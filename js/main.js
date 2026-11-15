@@ -60,6 +60,7 @@
         <tr><td>${st(rh.mid)}</td><td>Midfield</td><td>${st(ra.mid)}</td></tr>
         <tr><td>${st(rh.def)}</td><td>Defence</td><td>${st(ra.def)}</td></tr>
       </table>
+      <p class="hint"><span style="color:${h.kit.shirt}">${h.short}</span>: ${h.style ? h.style.epithet : ''}<br><span style="color:${a.kit.shirt}">${a.short}</span>: ${a.style ? a.style.epithet : ''}</p>
       <p>You attack right to left.</p>
       <p><button class="btn toggle" id="fcBtn">Full court: ${settings.fullCourt ? 'ON' : 'OFF'} (F)</button></p>
       <p class="hint">${settings.fullCourt ? 'Continuous 11v11: you defend too.' : 'You play your attacks; the CPU\'s attacks are resolved offscreen.'}</p>

@@ -89,11 +89,13 @@
   PP.TEAM_DEFS = [
     {
       id: 'riv', name: 'Rivermouth Rovers', short: 'RIV', formation: '4-3-3', rating: 72,
+      style: { block: 'mid', compact: 0.6, epithet: 'Balanced, compact mid block' },
       kit: { shirt: '#2ec4b6', shade: '#178277', shorts: '#f4f4f4', socks: '#2ec4b6' },
       gkKit: { shirt: '#ffd23f', shade: '#b8900c', shorts: '#222222', socks: '#ffd23f' },
     },
     {
       id: 'ash', name: 'Ashford Athletic', short: 'ASH', formation: '4-4-2', rating: 72,
+      style: { block: 'high', compact: 0.4, epithet: 'Aggressive high press, leaves gaps behind' },
       kit: { shirt: '#d7263d', shade: '#8f1a29', shorts: '#1b1b2f', socks: '#d7263d' },
       gkKit: { shirt: '#7bd389', shade: '#3f8a4c', shorts: '#1b1b2f', socks: '#7bd389' },
     },
@@ -134,6 +136,9 @@
       this.ownX = dir === 1 ? 0 : C.W;
       this.attackX = dir === 1 ? C.W : 0;
       this.phase = 'defend';
+      this.style = def.style || { block: 'mid', compact: 0.5, epithet: '' };
+      this.block = this.style.block;      // current defensive block (phases may override)
+      this.compact = this.style.compact;
       const form = PP.FORMATIONS[def.formation];
       const squad = def.squad || PP.makeSquad(def.formation, def.rating);
       def.squad = squad;

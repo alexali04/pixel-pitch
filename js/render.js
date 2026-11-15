@@ -236,7 +236,7 @@
         g.fillRect(Math.round(x0 + (x1 - x0) * t), Math.round(y0 + (y1 - y0) * t - lift), 1, 1);
       }
       g.fillStyle = col;
-      if (pv.target) this.ring(this.sx(pv.target.rx, pv.target.ry), this.sy(pv.target.ry), col);
+      if (pv.target) this.ring(this.sx(pv.target.rx, pv.target.ry), this.sy(pv.target.ry), pv.offside ? '#e4572e' : col);
       for (let k = -2; k <= 2; k++) { g.fillRect(x1 + k, y1 + Math.round(k / 2), 1, 1); g.fillRect(x1 + k, y1 - Math.round(k / 2), 1, 1); }
     }
 

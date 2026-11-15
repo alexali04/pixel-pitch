@@ -41,7 +41,7 @@
     topSpeed(sprint) {
       let v = 4.3 + this.stats.pace * 0.016;   // pace 75 -> 5.5 m/s jog
       if (sprint) v *= 1.3;                     //          -> 7.2 m/s sprint
-      if (this.hasBall) v *= 0.9;
+      if (this.hasBall) v *= sprint ? 0.86 : 0.92;
       return v;
     }
 

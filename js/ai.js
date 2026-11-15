@@ -2,9 +2,60 @@
   const C = PP.C, U = PP.U;
   const AI = (PP.AI = {});
   const ATTACKERS = new Set(['ST', 'LW', 'RW', 'AM']);
-  // How far up the pitch a defending shape sits, by block. Stage 2 will flesh these out.
-  AI.BLOCK_SHIFT = { high: 0.07, mid: 0, low: -0.12 };
-  const BACKLINE = new Set(['LB', 'RB', 'CB']);
+
+  // Defensive blocks. Depths are fractions of pitch length from our own goal, widths are
+  // fractions of the formation's width.
+  //   line      back-line depth with the ball around halfway (low ~18m, mid ~33m, high ~46m)
+  //   len       back line -> front line distance (the block's vertical compactness)
+  //   width     how much of the formation width is kept (horizontal compactness)
+  //   shift     how far the block slides towards the ball side
+  //   pressZone press only once the ball is closer to our goal than this
+  //   pressers  how many players go to the ball
+  AI.BLOCKS = {
+    low:  { line: 0.17, len: 0.24, width: 0.62, shift: 0.40, pressZone: 0.42, pressers: 1, range: 10 },
+    mid:  { line: 0.31, len: 0.28, width: 0.68, shift: 0.36, pressZone: 0.62, pressers: 1, range: 13 },
+    high: { line: 0.44, len: 0.32, width: 0.74, shift: 0.32, pressZone: 1.01, pressers: 2, range: 17 },
+  };
+  // Where each role sits inside the block: 0 = back line, 1 = front line.
+  const TIER = { LB: 0, CB: 0, RB: 0, DM: 0.3, CM: 0.55, LM: 0.55, RM: 0.55, AM: 0.75, LW: 0.72, RW: 0.72, ST: 1 };
+
+  // Depth (our frame) of the opposing outfield player closest to our goal.
+  AI.deepestAttacker = function (m, team) {
+    let mn = 1;
+    for (const o of m.other(team).players) if (!o.isGK) mn = Math.min(mn, team.depth(o.x));
+    return mn;
+  };
+
+  // Depth of the deepest opponent making a run at our goal (sprinting goal-wards); 1 if none.
+  // Static attackers don't drag the line back: offside does that job.
+  AI.runnerDepth = function (m, team) {
+    // Our second-last player: runners already past it are offside and can be left.
+    const ours = team.players.map((q) => team.depth(q.x)).sort((a, b) => a - b);
+    const secondLast = ours[1];
+    let mn = 1;
+    for (const o of m.other(team).players) {
+      if (o.isGK || o.vx * (team.ownX - o.x) <= 0 || Math.hypot(o.vx, o.vy) < 5) continue;
+      if (team.depth(o.x) < secondLast - 0.01) continue;
+      mn = Math.min(mn, team.depth(o.x));
+    }
+    return mn;
+  };
+
+  // The actual offside line in this team's attacking frame (second-last opponent), with no
+  // halfway floor.
+  AI.trueOffsideLine = function (m, team) {
+    const ds = m.other(team).players.map((o) => team.depth(o.x)).sort((a, b) => b - a);
+    return ds[1];
+  };
+
+  // Moments that invite a press: back to goal, pinned on the touchline, or a back pass.
+  AI.pressTrigger = function (m, c) {
+    const facingBack = c.fx * c.team.dir < -0.35;
+    const touchline = c.y < 6 || c.y > C.H - 6;
+    const lk = m.ball.lastKick;
+    const backPass = lk && lk.back && lk.target === c && m.time - lk.t < 1.5;
+    return facingBack || touchline || backPass;
+  };
 
   AI.update = function (m, dt) {
     m.ballPath = m.ball.owner ? null : m.ball.predict(30, 0.1);
@@ -74,20 +125,32 @@
       if (userCtl && ctlT <= bestT + 0.3) chaser = null;
     }
 
-    // Who presses the ball carrier. High press sends two; a low block only engages once
-    // the ball is in its own half.
-    const pressers = new Set();
+    // Defending roles: pressers go to the ball (count/zone set by the block, +1 on a trigger),
+    // otherwise the nearest player contains; defenders goal-side of a runner converge on him.
+    const pressers = new Set(), blockers = new Set();
+    let container = null;
     if (m.state === 'play' && owner && owner.team !== team) {
+      const B = AI.BLOCKS[team.block || 'mid'];
+      const cd = team.depth(owner.x);
       const cands = team.players.filter((p) => !p.isGK && p !== userCtl && !p.isDown())
         .map((p) => ({ p, d: U.dist(p.x, p.y, owner.x, owner.y) })).sort((a, b) => a.d - b.d);
-      const block = team.block || 'mid';
-      let n = block === 'high' ? 2 : 1;
-      if (block === 'low' && team.depth(owner.x) > 0.45) n = 0;
-      const range = block === 'high' ? 16 : block === 'mid' ? 13 : 10; // only press what's near
+      const trig = AI.pressTrigger(m, owner);
+      let n = cd < B.pressZone ? B.pressers : 0;
+      if (trig && cd < B.pressZone + 0.2) n++;
+      const range = B.range + (trig ? 6 : 0);
       for (const c of cands.slice(0, n)) if (c.d < range || c === cands[0]) pressers.add(c.p);
+      if (!pressers.size && cands.length) container = cands[0].p;
+      const sp = Math.hypot(owner.vx, owner.vy);
+      if (sp > 4 && owner.vx * (team.ownX - owner.x) > 0) {
+        for (const c of cands) {
+          if (blockers.size >= 2 || c.d > 7) break;
+          if (pressers.has(c.p) || c.p === container) continue;
+          if (team.depth(c.p.x) < cd) blockers.add(c.p);
+        }
+      }
       if (team.isUser && cands.length) {
         const dCtl = userCtl ? U.dist(userCtl.x, userCtl.y, owner.x, owner.y) : 1e9;
-        if (dCtl < cands[0].d + 2 || cands[0].d > 10) pressers.clear();
+        if (dCtl < cands[0].d + 2 || cands[0].d > 10) { pressers.clear(); container = null; }
       }
     }
 
@@ -105,7 +168,9 @@
         continue;
       }
       if (p === chaser) { p.steer(p._it.x, p._it.y, true, 0.5); continue; }
-      if (pressers.has(p)) { AI.press(m, p, owner); continue; }
+      if (pressers.has(p)) { AI.press(m, p, owner, false); continue; }
+      if (blockers.has(p)) { AI.press(m, p, owner, Math.hypot(owner.vx, owner.vy) > 5.5, 1.6); continue; }
+      if (p === container) { AI.contain(m, p, owner); continue; }
       const tg = AI.shapeTarget(m, team, p, phase, lineD);
       const d = U.dist(p.x, p.y, tg.x, tg.y);
       p.steer(tg.x, tg.y, d > 9 || tg.sprint, 2.5);
@@ -113,33 +178,49 @@
     }
   };
 
-  // Base positional target for an off-ball player. Stage 2 replaces this with tactic-driven blocks.
+  // Positional target for an off-ball player.
   AI.shapeTarget = function (m, team, p, phase, lineD) {
     const b = m.ball, s = p.slot, r = m.restart;
     const ballD = team.depth(b.x), bl = b.y / C.H;
     let d, l, sprint = false;
 
     if (m.state === 'restart' && r.kind === 'kickoff') {
-      d = Math.min(s.d * 0.6, 0.46); l = s.l;
+      if (p === r.partner) return { x: p.x, y: p.y, sprint: false };
+      d = Math.min(s.d * 0.72, 0.45); l = s.l;
     } else if (m.state === 'restart' && r.kind === 'corner') {
       return AI.cornerTarget(m, team, p);
     } else if (phase === 'attack') {
-      d = 0.1 + s.d * 0.78 + ballD * 0.32;
-      l = 0.5 + (s.l - 0.5) * 1.1 + (bl - 0.5) * 0.2;
+      // The whole team moves with the ball: the back line sits ~28m behind it.
+      const back = U.clamp(ballD - 0.27, 0.07, 0.55);
+      d = back + (s.d - 0.17) * 0.92;
+      l = 0.5 + (s.l - 0.5) * 1.1 + (bl - 0.5) * 0.22;
       if (ATTACKERS.has(s.role) && m.state === 'play') {
         if (m.time > p.runUntil + 1.5 && Math.random() < C.DT * 0.35) p.runUntil = m.time + U.rand(1.2, 2.2);
         if (m.time < p.runUntil) { d = Math.max(d, lineD + 0.05); sprint = true; }
-        else d = Math.min(d, lineD - 0.01);
       }
+      if (!sprint) d = Math.min(d, lineD - 0.01);
     } else {
-      d = 0.06 + s.d * 0.62 + ballD * 0.3 + (AI.BLOCK_SHIFT[team.block] || 0);
-      l = 0.5 + (s.l - 0.5) * 0.75 + (bl - 0.5) * 0.35;
-      if (BACKLINE.has(s.role)) d = Math.min(d, ballD - 0.03);
+      const B = AI.BLOCKS[team.block || 'mid'], comp = team.compact ?? 0.5;
+      let line = B.line + (ballD - 0.5) * 0.18;                // breathe with the ball
+      line = Math.min(line, ballD - 0.07);                      // stay goal-side of it
+      line = Math.min(line, AI.runnerDepth(m, team) - 0.01);     // drop off with runners
+      line = Math.max(line, 0.055);
+      let tier = TIER[s.role] ?? 0.5;
+      if (team.block === 'low' && (s.role === 'LW' || s.role === 'RW')) tier = 0.55; // wingers drop in
+      d = line + tier * B.len * (1.2 - 0.4 * comp);
+      l = 0.5 + (s.l - 0.5) * B.width * (1.18 - 0.36 * comp) + (bl - 0.5) * B.shift;
     }
     d = U.clamp(d, 0.04, 0.94);
     l = U.clamp(l, 0.03, 0.97);
     const t = team.toWorld(d, l);
     t.sprint = sprint;
+
+    // Don't crowd our own ball carrier.
+    const o = b.owner;
+    if (phase === 'attack' && o && o.team === team && o !== p && m.state === 'play') {
+      const dx = t.x - o.x, dy = t.y - o.y, dd = Math.hypot(dx, dy);
+      if (dd < 7) { const n = dd > 0.1 ? { x: dx / dd, y: dy / dd } : { x: -team.dir, y: 0 }; t.x = o.x + n.x * 7; t.y = U.clamp(o.y + n.y * 7, 1, C.H - 1); }
+    }
 
     if (m.state === 'restart' && r.team !== team) {
       const R = r.kind === 'throw' ? 3 : r.kind === 'phase' ? 14 : 9.2;
@@ -165,17 +246,41 @@
     return t;
   };
 
-  AI.press = function (m, p, owner) {
+  // The carrier's most dangerous forward outlet (for cover shadows).
+  AI.bestOutlet = function (m, c) {
+    let best = null, bg = 0.02;
+    for (const q of c.team.players) {
+      if (q === c || q.isGK || U.dist(q.x, q.y, c.x, c.y) > 25) continue;
+      const g = c.team.depth(q.x) - c.team.depth(c.x);
+      if (g > bg) { bg = g; best = q; }
+    }
+    return best;
+  };
+
+  // Close the carrier down, curving the run so it blocks their best forward pass.
+  AI.press = function (m, p, owner, hurry, dist = 1.1) {
     const team = p.team;
-    const n = U.norm(team.ownX - owner.x, C.H / 2 - owner.y);
-    const tx = owner.x + n.x * 1.1 + owner.vx * 0.25;
-    const ty = owner.y + n.y * 1.1 + owner.vy * 0.25;
+    let dir = U.norm(team.ownX - owner.x, C.H / 2 - owner.y);
+    const opt = AI.bestOutlet(m, owner);
+    if (opt) {
+      const to = U.norm(opt.x - owner.x, opt.y - owner.y);
+      dir = U.norm(dir.x * 0.6 + to.x * 0.4, dir.y * 0.6 + to.y * 0.4);
+    }
+    const tx = owner.x + dir.x * dist + owner.vx * 0.25;
+    const ty = owner.y + dir.y * dist + owner.vy * 0.25;
     const d = U.dist(p.x, p.y, owner.x, owner.y);
-    p.steer(tx, ty, d > 9, 1.5);
+    p.steer(tx, ty, d > 9 || hurry, 1.5);
     if (d < 1.6 && p.tackleCd <= 0 && m.time > m.ball.protectUntil) {
       p.tackleCd = U.rand(1.0, 1.8);
       if (Math.random() < 0.6) m.startLunge(p, owner, 0.24);
     }
+  };
+
+  // Stay goal-side a few metres off the carrier without diving in.
+  AI.contain = function (m, p, owner) {
+    const n = U.norm(p.team.ownX - owner.x, C.H / 2 - owner.y);
+    p.steer(owner.x + n.x * 4.5, owner.y + n.y * 4.5, false, 1.5);
+    p.face(owner.x, owner.y);
   };
 
   // ---------- ball carrier ----------
@@ -216,6 +321,7 @@
     const myD = team.depth(p.x);
     const lk = m.ball.lastKick;
     const lineD = AI.offsideLine(m, team);
+    const trueLine = AI.trueOffsideLine(m, team);
     const out = [];
     for (const q of team.players) {
       if (q === p || q.isDown()) continue;
@@ -223,7 +329,7 @@
       const d = U.dist(p.x, p.y, q.x, q.y);
       if (d < 5 || d > maxD) continue;
       const qd = team.depth(q.x);
-      if (qd > lineD + 0.01 && qd > 0.5) continue; // would be offside
+      if (qd > 0.5 && qd > team.depth(p.x) && qd > trueLine + 0.004) continue; // would be offside
       const gain = qd - myD;
       const Tg = PP.Ball.groundTime(d, PP.Match.arrivalSpeed(d));
       const Tl = PP.Ball.loftTime(d);
@@ -329,7 +435,8 @@
     let opts = AI.passOptions(m, p, r.kind === 'throw' ? 22 : 50);
     if (r.kind === 'throw' || r.kind === 'kickoff') opts = opts.filter((o) => !o.lofted || r.kind === 'throw');
     if (r.kind === 'kickoff') {
-      // play it back or sideways to a teammate in our half
+      if (r.partner && Math.random() < 0.7) { m.passTo(p, r.partner, false); return; }
+      // otherwise play it straight back into midfield
       const backs = opts.filter((o) => team.depth(o.target.x) < 0.5);
       if (backs.length) opts = backs;
     }

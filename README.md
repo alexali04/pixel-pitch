@@ -43,13 +43,27 @@ Toggle on the title screen (button or **F**):
 
 - **Full court OFF** (default): you only play your attacking phases, each starting from a
   scenario: *build-up* from your keeper against a high press, or *break them down* against a
-  settled mid/low block. A phase ends when you score, it goes out to them, the attack fizzles
-  (45s), or you lose the ball in your own half. Lose it in their half and you can win it back:
-  the phase only ends if they get it into your half (or keep it 12s). The CPU's attacks happen offscreen: the chance they score depends
+  settled mid/low block. If you lose the ball you defend it live: the phase ends when they
+  shoot, it goes out, or they keep it 15s (the rest of their attack then happens offscreen);
+  win it back and your attack carries on. It also ends when you score or your attack fizzles (45s). The CPU's attacks happen offscreen: the chance they score depends
   on where you lost it (own third is dangerous) and their attack/midfield stars vs your
   defence/midfield stars. The clock jumps between phases (7 per half).
 - **Full court ON**: continuous 11v11, you defend too. Control switches to the best goal-side
   defender, who also pokes at the ball automatically when close.
+
+## Tactics
+
+Each team has a style (shown on the title screen): a defensive block and how compact it is.
+
+- **Low block**: back line ~18m from goal, very compact, presses only in its own third.
+- **Mid block**: back line ~33m, presses from around halfway.
+- **High press**: back line ~45m, two pressers anywhere; vulnerable in behind.
+
+Blocks slide towards the ball, move up and down with it as connected lines, and drop off with
+runners. An extra player presses on triggers (receiver facing his own goal, pinned on the
+touchline, a back pass), pressers curve their run to block the carrier's best pass (cover
+shadow), and defenders goal-side of a sprinting runner converge on him. Offside is enforced.
+Sprinting with the ball means bigger touches that defenders can nick.
 
 ## Layout
 

@@ -101,7 +101,8 @@
       }
       const fwd = team.outfield().slice().sort((a, b) => b.slot.d - a.slot.d);
       const taker = fwd[0], mate = fwd[1];
-      mate.x = C.W / 2 - team.dir * 1.5; mate.y = C.H / 2 + 5;
+      mate.x = C.W / 2 - team.dir * 0.8; mate.y = C.H / 2 + 2.5; // partner beside the ball
+      mate.face(C.W / 2, C.H / 2);
       // Kicking-off team's taker stands at the ball; the other team stays outside the circle.
       const opp = this.other(team);
       for (const p of opp.players) {
@@ -112,6 +113,7 @@
         }
       }
       this.setRestart('kickoff', team, taker, C.W / 2, C.H / 2);
+      this.restart.partner = mate;
     }
 
     setRestart(kind, team, taker, bx, by) {
@@ -136,7 +138,7 @@
       for (const q of this.players) { q.ox = q.x; q.oy = q.y; }
       b.ox = b.x; b.oy = b.y; b.oz = b.z;
       if (kind !== 'gk') this.sfx('whistle', 1);
-      const names = { throw: 'Throw-in', corner: 'Corner', goalkick: 'Goal kick' };
+      const names = { throw: 'Throw-in', corner: 'Corner', goalkick: 'Goal kick', freekick: 'Free kick' };
       if (names[kind]) this.say(names[kind], 1.1);
     }
 
@@ -144,6 +146,7 @@
       this.gainPossession(gk);
       gk.dive = 0; gk.stun = 0;
       if (this.state === 'between') return;
+      if (!this.fullCourt && this.phase && !gk.team.isUser) { this.endPhase('saved', gk.x); return; }
       this.setRestart('gk', gk.team, gk, gk.x + gk.fx * 0.35, gk.y + gk.fy * 0.35);
     }
 
@@ -161,11 +164,24 @@
       const b = this.ball;
       b.owner = null;
       b.lastTouch = p;
-      b.lastKick = { type, by: p, team: p.team, target, t: this.time };
+      b.lastKick = { type, by: p, team: p.team, target, t: this.time,
+        back: !!target && p.team.depth(target.x) < p.team.depth(p.x) - 0.03 };
+      if (type === 'pass' && this.state === 'play') {
+        // Offside: in their half, ahead of the ball and of the second-last defender.
+        const t = p.team, line = PP.AI.trueOffsideLine(this, t), bd = t.depth(b.x);
+        const off = new Set();
+        for (const q of t.players) {
+          if (q === p || q.isGK) continue;
+          const d = t.depth(q.x);
+          if (d > 0.5 && d > bd && d > line + 0.004) off.add(q);
+        }
+        if (off.size) b.lastKick.offside = off;
+      }
       p.kickCd = 0.35;
       p.kickAnim = 0.18;
       const sp = Math.hypot(b.vx, b.vy);
-      if (type === 'shot') this.sfx('shot', U.clamp((sp - 14) / 19, 0, 1));
+      if (type === 'touch') { /* dribble touch: silent */ }
+      else if (type === 'shot') this.sfx('shot', U.clamp((sp - 14) / 19, 0, 1));
       else if (b.vz > 0.5) this.sfx('chip', U.clamp(sp / 20, 0, 1));
       else this.sfx('pass', U.clamp((sp - 6) / 15, 0, 1));
       this.endRestart();
@@ -263,7 +279,12 @@
         const vreq = Ball.groundSpeedFor(U.dist(b.x, b.y, target.x, target.y), 5);
         if (Math.hypot(vx, vy) < vreq) return this.passPlan(p, nx, ny, false, power, vreq);
       }
-      return { vx, vy, vz, lofted, x: end.x, y: end.y, target };
+      let offside = false;
+      if (target) {
+        const t = p.team, d = t.depth(target.x);
+        offside = d > 0.5 && d > t.depth(b.x) && d > PP.AI.trueOffsideLine(this, t) + 0.004;
+      }
+      return { vx, vy, vz, lofted, x: end.x, y: end.y, target, offside };
     }
 
     // aimY in [-1, 1] picks the vertical spot in the goal mouth; power in [0, 1].
@@ -337,8 +358,22 @@
       }
     }
 
+    // A player flagged offside at the moment of the pass plays the ball: free kick.
+    checkOffside(p) {
+      const lk = this.ball.lastKick;
+      if (!lk || !lk.offside || this.state !== 'play') return false;
+      if (!lk.offside.has(p)) { lk.offside = null; return false; } // someone else played it
+      const def = this.other(p.team);
+      let taker = null, bd = 1e9;
+      for (const q of def.outfield()) { const d = U.dist(q.x, q.y, p.x, p.y); if (d < bd) { bd = d; taker = q; } }
+      this.restartOrEnd('freekick', def, taker, U.clamp(p.x, 1, C.W - 1), U.clamp(p.y, 1, C.H - 1));
+      this.say('Offside!', 1.4);
+      return true;
+    }
+
     gainPossession(p) {
       const b = this.ball;
+      if (this.checkOffside(p)) return;
       b.owner = p; b.lastTouch = p;
       b.vx = b.vy = b.vz = 0; b.z = 0;
       b.protectUntil = this.time + 0.7;
@@ -347,9 +382,9 @@
       if (p.team.isUser) this.controlled = p;
       else { this.controlled = this.bestDefender(p.x, p.y); this.lastAutoSwitch = this.time; }
       if (!this.fullCourt && this.phase && this.state !== 'goal') {
-        if (p.team.isUser) this.phase.lostAt = null;                         // won it back
-        else if (this.home.depth(p.x) < 0.5 || p.isGK) this.endPhase('turnover', p.x); // lost it in our half
-        else if (this.phase.lostAt == null) { this.phase.lostAt = this.time; this.say('Win it back!', 1.2); }
+        if (p.team.isUser) {
+          if (this.phase.lostAt != null) { this.phase.lostAt = null; this.phase.start = this.time; } // won it back
+        } else if (this.phase.lostAt == null) { this.phase.lostAt = this.time; this.say('Defend!', 1.0); }
       }
     }
 
@@ -371,7 +406,7 @@
       const k = 1 + U.gauss() * 0.03 * (1.6 - skill);
       b.vx = v.x * k; b.vy = v.y * k; b.vz = plan.vz * k;
       b.z = plan.lofted ? 0.01 : 0;
-      this.latch = this.time + 0.8;
+      this.latch = true; this.latchAxis = null;
       this.release(p, 'pass', plan.target);
       if (plan.target) { this.controlled = plan.target; plan.target.receiving = { t: this.time }; }
     }
@@ -410,12 +445,22 @@
 
       // After a pass the held direction belongs to the passer: ignore it for the receiver
       // until the stick is released (or a moment passes).
-      if (this.latch && (!active || this.time > this.latch)) this.latch = 0;
+      const la = this.latchAxis;
+      if (this.latch && (!active || (la && (ax.x !== la.x || ax.y !== la.y)))) this.latch = false;
       const steering = active && !this.latch;
-      if (steering) p.receiving = null;
-      p.userAuto = !!(p.receiving && !steering && !b.owner);
+      const recv = !!(p.receiving && !b.owner);
+      p.userAuto = recv && !steering;
+      let blended = false;
+      if (steering && recv && !p.isDown() && p.lunge <= 0) {
+        // Negotiate: keep running onto the pass, nudged by the stick. Only a firm opposite
+        // input cancels the run.
+        const it = PP.AI.interceptTime(this, p), n = U.norm(ax.x, ax.y);
+        const to = U.norm(it.x - p.x, it.y - p.y);
+        if (n.x * to.x + n.y * to.y < -0.5) p.receiving = null;
+        else { const d = U.norm(to.x + n.x * 0.6, to.y + n.y * 0.6); p.move(d.x, d.y, true); blended = true; }
+      }
 
-      if (!p.userAuto && !p.isDown() && p.lunge <= 0) {
+      if (!blended && !p.userAuto && !p.isDown() && p.lunge <= 0) {
         if (this.latch && !p.frozen) p.stop();
         else if (p.frozen) {
           if (active) { const n = U.norm(ax.x, ax.y); p.fx = n.x; p.fy = n.y; }
@@ -431,6 +476,7 @@
           const kind = I.hit('pass') ? 'pass' : I.hit('lob') ? 'lob' : I.hit('shoot') ? (setPiece ? 'lob' : 'shot') : null;
           if (kind) {
             this.charging = true; this.chargeKind = kind; this.charge = 0;
+            this.prevKeys = (ax.x ? 1 : 0) + (ax.y ? 1 : 0); this.aimHold = 0;
             this.chargeBtn = I.hit('shoot') ? 'shoot' : kind;
             // Aim starts where you're pointing (or facing) ...
             this.aim = active ? U.norm(ax.x, ax.y) : { x: p.fx, y: p.fy };
@@ -441,7 +487,10 @@
           const fill = this.chargeKind === 'shot' ? 0.9 : 0.45;
           if (I.down(this.chargeBtn)) this.charge = Math.min(1, this.charge + dt / fill);
           // ... and turns smoothly towards the held direction, so any angle is reachable.
-          if (active) {
+          const nKeys = (ax.x ? 1 : 0) + (ax.y ? 1 : 0);
+          if (nKeys < (this.prevKeys || 0)) this.aimHold = this.time + 0.2; // a key was just let go
+          this.prevKeys = nKeys;
+          if (active && this.time > (this.aimHold || 0)) {
             const want = Math.atan2(ax.y, ax.x), cur = Math.atan2(this.aim.y, this.aim.x);
             let da = want - cur;
             while (da > Math.PI) da -= 2 * Math.PI;
@@ -454,7 +503,7 @@
             const k = this.chargeKind, pw = this.charge;
             this.charging = false; this.charge = 0; this.chargeKind = null;
             if (k === 'shot') this.shoot(p, ax.y, pw);
-            else this.userPass(p, this.passPlan(p, this.aim.x, this.aim.y, k === 'lob', pw));
+            else { this.userPass(p, this.passPlan(p, this.aim.x, this.aim.y, k === 'lob', pw)); this.latchAxis = { x: ax.x, y: ax.y }; }
             this.preview = null;
             return;
           }
@@ -517,6 +566,7 @@
     }
 
     doHeader(p, kind, aim, aimY = 0) {
+      if (this.checkOffside(p)) return;
       const b = this.ball, team = p.team, hs = p.stats.heading / 100;
       let vx, vy, vz;
       if (kind === 'shoot') {
@@ -635,13 +685,11 @@
       }
       if (this.phase && this.state === 'play') {
         if (this.time - this.phase.start > 45 && this.phase.lostAt == null) { this.endPhase('timeout'); return; }
-        // Counter-press: they've got it in their half. If they get it into ours (or keep it 12s), it's over.
+        // They've got it: the possession plays out live (you defend). If they keep it 15s
+        // without a shot or it going out, the rest of their attack happens offscreen.
         const lk = this.ball.lastKick, ow = this.ball.owner;
         const theirs = ow ? !ow.team.isUser : !!(lk && !lk.team.isUser);
-        if (this.phase.lostAt != null && theirs) {
-          if (this.home.depth(this.ball.x) < 0.5) { this.endPhase('countered', this.ball.x); return; }
-          if (this.time - this.phase.lostAt > 12) { this.endPhase('turnover', this.ball.x); return; }
-        }
+        if (this.phase.lostAt != null && theirs && this.time - this.phase.lostAt > 15) { this.endPhase('turnover', this.ball.x); return; }
       }
       if (this.controlled && this.controlled.isGK && this.ball.owner !== this.controlled) {
         this.controlled = this.nearestUser(this.ball.x, this.ball.y);
@@ -675,12 +723,29 @@
         if (this.state === 'restart' && this.restart.kind === 'gk') {
           b.x = p.x + p.fx * 0.35; b.y = p.y + p.fy * 0.35; b.z = 1.0;
         } else {
+          // Sprinting with it means bigger touches: the ball is knocked ahead and is loose
+          // (and stealable) until you catch up with it.
+          if (this.state === 'play' && !p.isGK) {
+            const sp = Math.hypot(p.vx, p.vy);
+            if (sp > p.topSpeed(false) * 1.05) {
+              p.touchT = (p.touchT ?? 0.3) - dt;
+              if (p.touchT <= 0) { p.touchT = 0.4 + p.stats.dribbling * 0.002; this.knockOn(p, sp); return; }
+            } else p.touchT = 0.3;
+          }
           const tx = p.x + p.fx * 0.6, ty = p.y + p.fy * 0.6;
           const k = this.state === 'restart' ? 1 : Math.min(1, dt * 18);
           b.x += (tx - b.x) * k; b.y += (ty - b.y) * k; b.z = 0;
         }
         b.vx = p.vx; b.vy = p.vy; b.vz = 0;
       } else b.step(dt);
+    }
+
+    knockOn(p, sp) {
+      const b = this.ball, extra = 2.8 - p.stats.dribbling * 0.016; // better dribblers keep it closer
+      b.x = p.x + p.fx * 0.6; b.y = p.y + p.fy * 0.6;
+      b.vx = p.fx * (sp + extra); b.vy = p.fy * (sp + extra); b.vz = 0;
+      this.release(p, 'touch', p);
+      p.kickCd = 0.2; p.kickAnim = 0.1;
     }
 
     separate() {
@@ -848,7 +913,7 @@
     }
 
     restartOrEnd(kind, team, taker, bx, by) {
-      if (!this.fullCourt && !team.isUser) this.endPhase(kind === 'goalkick' ? 'wide' : 'out', bx);
+      if (!this.fullCourt && !team.isUser) this.endPhase(kind === 'goalkick' ? 'wide' : kind === 'corner' ? 'corner' : 'out', bx);
       else this.setRestart(kind, team, taker, bx, by);
     }
 
@@ -856,9 +921,10 @@
 
     startPhase() {
       const home = this.home, away = this.away, AI = PP.AI;
-      const kind = Math.random() < 0.5 ? 'buildup' : 'breakdown';
-      away.block = kind === 'buildup' ? 'high' : U.pick(['mid', 'low']);
-      home.block = 'mid';
+      const sb = away.style.block;
+      const kind = Math.random() < { high: 0.65, mid: 0.45, low: 0.25 }[sb] ? 'buildup' : 'breakdown';
+      away.block = kind === 'buildup' ? (sb === 'low' ? 'mid' : 'high') : (sb === 'high' ? 'mid' : sb);
+      home.block = home.style.block;
       this.phaseInHalf++;
       this.phase = { kind, start: this.time };
       const b = this.ball;
@@ -889,7 +955,7 @@
       this.setRestart('phase', home, taker, b.x, b.y);
       b.protectUntil = this.time + 2.5; // a beat to look up before the press can tackle
       this.camSnap = true;
-      this.say(kind === 'buildup' ? 'Build-up vs high press' : `Break them down: ${away.block} block`, 1.8);
+      this.say(kind === 'buildup' ? `Build-up vs ${away.block === 'high' ? 'high press' : 'mid block'}` : `Break them down: ${away.block} block`, 1.8);
     }
 
     // Your attack is over. Resolve the CPU's offscreen attack and move the clock on.
@@ -899,13 +965,14 @@
       this.charging = false; this.preview = null;
       this.ball.owner = null; this.ball.vx = this.ball.vy = this.ball.vz = 0;
       const zone = this.home.depth(x); // 0 = our goal line .. 1 = theirs
-      const base = { turnover: zone < 0.33 ? 0.16 : zone < 0.66 ? 0.07 : 0.03, countered: 0.08, out: 0.03, wide: 0.02, timeout: 0.03, goal: 0.02 }[reason] ?? 0.03;
+      const conceded = reason === 'goal' && this.lastGoalTeam === this.away;
+      const base = conceded ? 0 : { turnover: zone < 0.33 ? 0.16 : zone < 0.66 ? 0.07 : 0.03, corner: 0.06, out: 0.03, wide: 0.02, saved: 0.02, timeout: 0.03, goal: 0.02 }[reason] ?? 0.03;
       const pGoal = U.clamp(base * Match.strengthFactor(this.ratings[1], this.ratings[0]), 0.01, 0.6);
       const per = (45 * 60) / Match.PHASES_PER_HALF;
       const next = (this.half - 1) * 45 * 60 + this.phaseInHalf * per;
       const newClock = Math.max(this.clock + 60, next);
       const away = this.away;
-      let text = { turnover: 'Lost it', countered: 'They broke through', out: 'Out of play', wide: 'Wide', timeout: 'Attack fizzled', goal: null }[reason];
+      let text = { turnover: 'They kept the ball', corner: 'Their corner', saved: 'Keeper has it', out: 'Out of play', wide: 'Wide', timeout: 'Attack fizzled', goal: null }[reason];
       if (Math.random() < pGoal) {
         const atk = away.players.filter((p) => ['ST', 'LW', 'RW', 'AM', 'LM', 'RM'].includes(p.role));
         const scorer = U.pick(atk.length ? atk : away.outfield());
@@ -934,6 +1001,7 @@
     goalScored(team) {
       const i = this.idx(team);
       this.score[i]++;
+      this.lastGoalTeam = team;
       const lt = this.ball.lastTouch;
       const og = lt && lt.team !== team;
       const lk = this.ball.lastKick;
