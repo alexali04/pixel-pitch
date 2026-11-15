@@ -9,6 +9,12 @@
   I.init();
 
   let match = null;
+  const settings = { fullCourt: false };
+  try { settings.fullCourt = localStorage.getItem('pp.fullCourt') === '1'; } catch (e) { /* no storage */ }
+  function setFullCourt(v) {
+    settings.fullCourt = v;
+    try { localStorage.setItem('pp.fullCourt', v ? '1' : '0'); } catch (e) { /* no storage */ }
+  }
   let screen = 'title';   // title | match | paused | halftime | fulltime
   let lastHud = '';
 
@@ -16,7 +22,7 @@
     const s = Math.max(1, Math.min(innerWidth / C.VIEW_W, innerHeight / C.VIEW_H));
     wrap.style.width = C.VIEW_W * s + 'px';
     wrap.style.height = C.VIEW_H * s + 'px';
-    wrap.style.setProperty('--s', s.toFixed(3));
+    wrap.style.setProperty('--s', ((s * C.VIEW_W) / 512).toFixed(3)); // HUD sized as at 512px
   }
   addEventListener('resize', fit);
   fit();
@@ -43,16 +49,28 @@
     match = null;
     hud.hidden = true;
     const [h, a] = PP.TEAM_DEFS;
+    PP.ensureSquad(h); PP.ensureSquad(a);
+    const rh = PP.teamRatings(h), ra = PP.teamRatings(a);
+    const st = (n) => '★'.repeat(Math.floor(n)) + (n % 1 ? '½' : '');
     show(`<h1>PIXEL PITCH</h1>
-      <p>Friendly: <span style="color:${h.kit.shirt}">${h.name}</span> vs <span style="color:${a.kit.shirt}">${a.name}</span></p>
+      <table class="stats ratings">
+        <tr><td style="color:${h.kit.shirt}">${h.name}</td><td></td><td style="color:${a.kit.shirt}">${a.name}</td></tr>
+        <tr><td>${st(rh.att)}</td><td>Attack</td><td>${st(ra.att)}</td></tr>
+        <tr><td>${st(rh.mid)}</td><td>Midfield</td><td>${st(ra.mid)}</td></tr>
+        <tr><td>${st(rh.def)}</td><td>Defence</td><td>${st(ra.def)}</td></tr>
+      </table>
       <p>You attack right to left.</p>
+      <p><button class="btn toggle" id="fcBtn">Full court: ${settings.fullCourt ? 'ON' : 'OFF'} (F)</button></p>
+      <p class="hint">${settings.fullCourt ? 'Continuous 11v11: you defend too.' : 'You play your attacks; the CPU\'s attacks are resolved offscreen.'}</p>
       ${CONTROLS}
-      <button class="btn">Kick off (Enter)</button>`, startMatch);
+      <button class="btn" id="koBtn">Kick off (Enter)</button>`);
+    $('fcBtn').addEventListener('click', () => { setFullCourt(!settings.fullCourt); titleScreen(); });
+    $('koBtn').addEventListener('click', startMatch);
   }
 
   function startMatch() {
     const [h, a] = PP.TEAM_DEFS;
-    match = new PP.Match(h, a);
+    match = new PP.Match(h, a, { fullCourt: settings.fullCourt });
     PP.match = match; // handy for debugging in the console
     $('homeName').textContent = h.short;
     $('awayName').textContent = a.short;
@@ -117,6 +135,7 @@
     last = now;
 
     if (I.hit('restart') && screen !== 'title') { I.endStep(); startMatch(); }
+    if (screen === 'title' && I.hit('fullcourt')) { I.endStep(); setFullCourt(!settings.fullCourt); titleScreen(); }
     if (screen === 'match') {
       if (I.hit('pause')) { I.endStep(); pause(); }
       else {

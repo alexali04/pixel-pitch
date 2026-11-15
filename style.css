@@ -140,3 +140,9 @@ kbd {
 .stats { margin: calc(var(--s) * 6px) auto 0; border-collapse: collapse; font-size: calc(var(--s) * 5px); }
 .stats td { padding: calc(var(--s) * 1.5px) calc(var(--s) * 6px); }
 .stats td:nth-child(2) { color: #9fd3c7; }
+.ratings { font-size: calc(var(--s) * 6px); margin-bottom: calc(var(--s) * 4px); }
+.ratings td:first-child { text-align: right; }
+.ratings td:last-child { text-align: left; }
+.ratings td { color: var(--accent); }
+.btn.toggle { margin-top: 0; font-size: calc(var(--s) * 6px); background: #9fd3c7; box-shadow: calc(var(--s) * 2px) calc(var(--s) * 2px) 0 #3e6e66; }
+.hint { font-size: calc(var(--s) * 5px); }

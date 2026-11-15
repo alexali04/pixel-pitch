@@ -24,14 +24,28 @@ then visit http://localhost:8765.
 | P / Esc | pause | pause |
 | R | restart the match | restart the match |
 
-Hold J / K / Space to set strength: tap = soft, hold = bullet (a bar shows above your player).
+Hold J / K / Space to set strength, like how far you swing your leg: a tap on J is a soft
+nudge and a full hold is a bullet; a tap on K is a little dink over a foot and a full hold is
+a ~40m ball; a full wind-up on a shot is hard but can fly wide or over. L and C also shoot.
 
-While a pass button is held, a dashed line shows where the pass will go (an X in space,
-a ring under the teammate it's aimed at).
+**Aiming passes:** the pass goes exactly where the aim points. The aim starts at your direction
+when you press J/K and then turns smoothly (~150°/s) towards whatever direction you hold, so
+you can stop it at any angle. A dashed line shows where the ball will go, and a ring marks the
+teammate who will get there first; they run onto it. Keepers can't handle back-passes.
 
-You attack right to left. Control switches automatically to whoever has the ball, and
-when defending to the best-placed defender between the ball and your goal. Get close to
-the carrier and your defender pokes at the ball on their own; Space/K still tackle manually.
+## Modes
+
+Toggle on the title screen (button or **F**):
+
+- **Full court OFF** (default): you only play your attacking phases, each starting from a
+  scenario: *build-up* from your keeper against a high press, or *break them down* against a
+  settled mid/low block. A phase ends when you score, it goes out to them, the attack fizzles
+  (45s), or you lose the ball in your own half. Lose it in their half and you can win it back:
+  the phase only ends if they get it into your half (or keep it 12s). The CPU's attacks happen offscreen: the chance they score depends
+  on where you lost it (own third is dangerous) and their attack/midfield stars vs your
+  defence/midfield stars. The clock jumps between phases (7 per half).
+- **Full court ON**: continuous 11v11, you defend too. Control switches to the best goal-side
+  defender, who also pokes at the ball automatically when close.
 
 ## Layout
 

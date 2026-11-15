@@ -2,6 +2,8 @@
   const C = PP.C, U = PP.U;
   const AI = (PP.AI = {});
   const ATTACKERS = new Set(['ST', 'LW', 'RW', 'AM']);
+  // How far up the pitch a defending shape sits, by block. Stage 2 will flesh these out.
+  AI.BLOCK_SHIFT = { high: 0.07, mid: 0, low: -0.12 };
   const BACKLINE = new Set(['LB', 'RB', 'CB']);
 
   AI.update = function (m, dt) {
@@ -72,23 +74,26 @@
       if (userCtl && ctlT <= bestT + 0.3) chaser = null;
     }
 
-    // Who presses the ball carrier.
-    let presser = null;
+    // Who presses the ball carrier. High press sends two; a low block only engages once
+    // the ball is in its own half.
+    const pressers = new Set();
     if (m.state === 'play' && owner && owner.team !== team) {
-      let bd = 1e9;
-      for (const p of team.players) {
-        if (p.isGK || p === userCtl || p.isDown()) continue;
-        const d = U.dist(p.x, p.y, owner.x, owner.y);
-        if (d < bd) { bd = d; presser = p; }
-      }
-      if (team.isUser && presser) {
+      const cands = team.players.filter((p) => !p.isGK && p !== userCtl && !p.isDown())
+        .map((p) => ({ p, d: U.dist(p.x, p.y, owner.x, owner.y) })).sort((a, b) => a.d - b.d);
+      const block = team.block || 'mid';
+      let n = block === 'high' ? 2 : 1;
+      if (block === 'low' && team.depth(owner.x) > 0.45) n = 0;
+      const range = block === 'high' ? 16 : block === 'mid' ? 13 : 10; // only press what's near
+      for (const c of cands.slice(0, n)) if (c.d < range || c === cands[0]) pressers.add(c.p);
+      if (team.isUser && cands.length) {
         const dCtl = userCtl ? U.dist(userCtl.x, userCtl.y, owner.x, owner.y) : 1e9;
-        if (dCtl < bd + 2 || bd > 10) presser = null;
+        if (dCtl < cands[0].d + 2 || cands[0].d > 10) pressers.clear();
       }
     }
 
     const lineD = AI.offsideLine(m, team);
     for (const p of team.players) {
+      if (p === userCtl && !p.userAuto) continue; // the user drives this one (keeper included)
       if (p.isGK) { AI.keeper(m, p, dt); continue; }
       if (p.lunge > 0) continue;
       if (p.receiving && m.time - p.receiving.t > 4) p.receiving = null;
@@ -100,7 +105,7 @@
         continue;
       }
       if (p === chaser) { p.steer(p._it.x, p._it.y, true, 0.5); continue; }
-      if (p === presser) { AI.press(m, p, owner); continue; }
+      if (pressers.has(p)) { AI.press(m, p, owner); continue; }
       const tg = AI.shapeTarget(m, team, p, phase, lineD);
       const d = U.dist(p.x, p.y, tg.x, tg.y);
       p.steer(tg.x, tg.y, d > 9 || tg.sprint, 2.5);
@@ -127,7 +132,7 @@
         else d = Math.min(d, lineD - 0.01);
       }
     } else {
-      d = 0.06 + s.d * 0.62 + ballD * 0.3;
+      d = 0.06 + s.d * 0.62 + ballD * 0.3 + (AI.BLOCK_SHIFT[team.block] || 0);
       l = 0.5 + (s.l - 0.5) * 0.75 + (bl - 0.5) * 0.35;
       if (BACKLINE.has(s.role)) d = Math.min(d, ballD - 0.03);
     }
@@ -137,7 +142,7 @@
     t.sprint = sprint;
 
     if (m.state === 'restart' && r.team !== team) {
-      const R = r.kind === 'throw' ? 3 : 9.2;
+      const R = r.kind === 'throw' ? 3 : r.kind === 'phase' ? 14 : 9.2;
       const dx = t.x - b.x, dy = t.y - b.y, dd = Math.hypot(dx, dy);
       if (dd < R) {
         const n = dd > 0.1 ? { x: dx / dd, y: dy / dd } : { x: -team.dir, y: 0 };
@@ -165,8 +170,8 @@
     const n = U.norm(team.ownX - owner.x, C.H / 2 - owner.y);
     const tx = owner.x + n.x * 1.1 + owner.vx * 0.25;
     const ty = owner.y + n.y * 1.1 + owner.vy * 0.25;
-    p.steer(tx, ty, true, 1);
     const d = U.dist(p.x, p.y, owner.x, owner.y);
+    p.steer(tx, ty, d > 9, 1.5);
     if (d < 1.6 && p.tackleCd <= 0 && m.time > m.ball.protectUntil) {
       p.tackleCd = U.rand(1.0, 1.8);
       if (Math.random() < 0.6) m.startLunge(p, owner, 0.24);
@@ -254,6 +259,12 @@
     const dG = U.dist(p.x, p.y, gx, gy);
     const myD = team.depth(p.x);
     const near = AI.nearestOpp(m, p);
+    if (p.isGK) {
+      const best = AI.passOptions(m, p, 55)[0];
+      if (best && (best.score > -1 || near.d > 6)) return best;
+      const t = team.toWorld(0.6, U.rand(0.15, 0.85));
+      return { kind: 'clear', x: t.x, y: t.y };
+    }
     const pressure = near.d;
 
     // Shoot?
@@ -335,7 +346,8 @@
     if (gk.isDown()) return;
 
     // Shot or ball heading at goal: get across, dive if needed.
-    if (!b.owner && m.state === 'play') {
+    const fromOpp = b.lastKick && b.lastKick.team !== team;
+    if (!b.owner && m.state === 'play' && fromOpp) {
       const sp = Math.hypot(b.vx, b.vy);
       if ((gx - b.x) * b.vx > 0 && sp > 7) {
         const tl = (gx - b.x) / b.vx;

@@ -8,8 +8,9 @@ PP.C = {
   SIX_D: 5.5, SIX_W: 15,
   CIRCLE_R: 8, SPOT: 11,
 
-  PPM: 8,                        // render pixels per metre
-  VIEW_W: 512, VIEW_H: 288,      // internal low-res canvas
+  // Tilted camera: different pixel scales across (x), down (y) and for height (z).
+  PX: 9, PY: 5.2, PZ: 7.5,       // ~62m of pitch visible across, full width visible down
+  VIEW_W: 560, VIEW_H: 315,      // internal low-res canvas
   MARGIN: 12,                    // metres of stadium drawn around the pitch
 
   G: 9.8,

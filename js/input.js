@@ -11,6 +11,7 @@
     start: ['Enter', 'NumpadEnter'],
     pause: ['KeyP', 'Escape'],
     restart: ['KeyR'],
+    fullcourt: ['KeyF'],
   };
   const GAME_KEYS = new Set(Object.values(BIND).flat());
 

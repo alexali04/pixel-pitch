@@ -4,7 +4,7 @@
   const noInput = { axis: () => ({ x: 0, y: 0 }), down: () => false, hit: () => false, released: () => false };
 
   function half(homeDef, awayDef) {
-    const m = new PP.Match(homeDef || PP.TEAM_DEFS[0], awayDef || PP.TEAM_DEFS[1]);
+    const m = new PP.Match(homeDef || PP.TEAM_DEFS[0], awayDef || PP.TEAM_DEFS[1], { fullCourt: true });
     m.autoplay = true;
     const r = { passOk: 0, passInt: 0, lobOk: 0, lobInt: 0, tackles: 0, restarts: {}, owned: 0, steps: 0, thirds: [0, 0, 0] };
     let pending = null;

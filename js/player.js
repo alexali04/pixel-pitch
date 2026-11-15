@@ -39,8 +39,8 @@
     get hasBall() { return this.team.match.ball.owner === this; }
 
     topSpeed(sprint) {
-      let v = 5.2 + this.stats.pace * 0.018;
-      if (sprint) v *= 1.28;
+      let v = 4.3 + this.stats.pace * 0.016;   // pace 75 -> 5.5 m/s jog
+      if (sprint) v *= 1.3;                     //          -> 7.2 m/s sprint
       if (this.hasBall) v *= 0.9;
       return v;
     }
@@ -89,8 +89,16 @@
       }
       if (this.frozen) { this.vx = 0; this.vy = 0; return; }
       if (this.lunge > 0 && this.lungeTarget) {
-        const n = U.norm(this.lungeTarget.x - this.x, this.lungeTarget.y - this.y);
-        this.dvx = n.x * 6.5; this.dvy = n.y * 6.5;
+        // Tackle lunge: snap straight at the ball carrier's feet.
+        const t = this.lungeTarget;
+        const n = U.norm(t.x + t.vx * 0.1 - this.x, t.y + t.vy * 0.1 - this.y);
+        const sp = this.lungeSpeed || 6.5;
+        this.vx = n.x * sp; this.vy = n.y * sp; this.dvx = this.vx; this.dvy = this.vy;
+        this.fx = n.x; this.fy = n.y;
+        this.x += this.vx * dt; this.y += this.vy * dt;
+        this.anim += sp * dt * 1.6;
+        this.clampToWorld();
+        return;
       }
 
       const acc = 10 + this.stats.acceleration * 0.08;

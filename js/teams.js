@@ -99,6 +99,28 @@
     },
   ];
 
+  // ---- 1-5 star ratings (half steps) from player stats ----
+  const avg = (s, keys) => keys.reduce((a, k) => a + s[k], 0) / keys.length;
+  const ROLE_GROUP = { GK: 'gk', CB: 'def', LB: 'def', RB: 'def', DM: 'mid', CM: 'mid', LM: 'mid', RM: 'mid', AM: 'att', LW: 'att', RW: 'att', ST: 'att' };
+  const GROUP_KEYS = {
+    att: ['finishing', 'shotPower', 'dribbling', 'pace', 'composure', 'firstTouch'],
+    mid: ['shortPass', 'longPass', 'vision', 'stamina', 'firstTouch', 'dribbling'],
+    def: ['tackling', 'marking', 'positioning', 'strength', 'heading', 'pace'],
+    gk: ['reflexes', 'diving', 'handling', 'gkPositioning'],
+  };
+  PP.stars = (r) => Math.round(U.clamp((r - 50) / 10 + 1, 1, 5) * 2) / 2;
+  PP.playerRating = (role, stats) => avg(stats, GROUP_KEYS[ROLE_GROUP[role]]);
+  // squad = def.squad (array of {stats}), formation = def.formation
+  PP.teamRatings = function (def) {
+    const form = PP.FORMATIONS[def.formation];
+    const g = { att: [], mid: [], def: [], gk: [] };
+    def.squad.forEach((pl, i) => { const role = form[i][0]; g[ROLE_GROUP[role]].push(PP.playerRating(role, pl.stats)); });
+    const mean = (a) => a.reduce((x, y) => x + y, 0) / a.length;
+    const raw = { att: mean(g.att), mid: mean(g.mid), def: mean(g.def) * 0.75 + mean(g.gk) * 0.25, gk: mean(g.gk) };
+    return { raw, att: PP.stars(raw.att), mid: PP.stars(raw.mid), def: PP.stars(raw.def), gk: PP.stars(raw.gk) };
+  };
+  PP.ensureSquad = (def) => { if (!def.squad) def.squad = PP.makeSquad(def.formation, def.rating); return def.squad; };
+
   class Team {
     constructor(def, dir, isUser, match) {
       this.def = def;
