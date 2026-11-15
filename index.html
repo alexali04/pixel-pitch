@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Pixel Pitch</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div id="wrap">
+  <canvas id="game" width="512" height="288"></canvas>
+  <div id="hud" hidden>
+    <div id="scorebar">
+      <span class="team"><i id="homeSwatch"></i><b id="homeName">HOM</b></span>
+      <span id="score">0 - 0</span>
+      <span class="team"><b id="awayName">AWY</b><i id="awaySwatch"></i></span>
+      <span id="clock">0'</span>
+    </div>
+    <div id="banner"></div>
+    <div id="playerTag"></div>
+  </div>
+  <div id="overlay"></div>
+</div>
+
+<script src="js/config.js"></script>
+<script src="js/util.js"></script>
+<script src="js/input.js"></script>
+<script src="js/ball.js"></script>
+<script src="js/player.js"></script>
+<script src="js/teams.js"></script>
+<script src="js/ai.js"></script>
+<script src="js/match.js"></script>
+<script src="js/render.js"></script>
+<script src="js/debug.js"></script>
+<script src="js/main.js"></script>
+</body>
+</html>

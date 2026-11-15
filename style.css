@@ -1,0 +1,142 @@
+:root {
+  --bg: #0d1b1e;
+  --fg: #f3f1e6;
+  --accent: #ffd23f;
+  --panel: rgba(10, 18, 24, 0.86);
+  --s: 2;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body {
+  height: 100%;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: 'Press Start 2P', ui-monospace, Menlo, monospace;
+  overflow: hidden;
+  user-select: none;
+}
+#wrap {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  width: 1024px;
+  height: 576px;
+}
+#game {
+  display: block;
+  width: 100%;
+  height: 100%;
+  image-rendering: pixelated;
+  image-rendering: crisp-edges;
+}
+#hud {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  font-size: calc(var(--s) * 6px);
+}
+#scorebar {
+  position: absolute;
+  top: calc(var(--s) * 4px);
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: calc(var(--s) * 5px);
+  background: var(--panel);
+  padding: calc(var(--s) * 3px) calc(var(--s) * 6px);
+  border: calc(var(--s) * 1px) solid #000;
+  box-shadow: 0 0 0 calc(var(--s) * 1px) #3a4a55 inset;
+  white-space: nowrap;
+}
+#scorebar .team { display: flex; align-items: center; gap: calc(var(--s) * 3px); }
+#scorebar i {
+  display: inline-block;
+  width: calc(var(--s) * 5px);
+  height: calc(var(--s) * 5px);
+  border: calc(var(--s) * 1px) solid #000;
+}
+#score { color: var(--accent); min-width: calc(var(--s) * 30px); text-align: center; }
+#clock { color: #9fd3c7; min-width: calc(var(--s) * 18px); text-align: right; }
+#banner {
+  position: absolute;
+  top: 36%;
+  left: 0;
+  right: 0;
+  text-align: center;
+  font-size: calc(var(--s) * 14px);
+  color: var(--accent);
+  text-shadow: calc(var(--s) * 1px) calc(var(--s) * 1px) 0 #000, calc(var(--s) * 2px) calc(var(--s) * 2px) 0 #7a2e00;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+#banner.show { opacity: 1; }
+#playerTag {
+  position: absolute;
+  left: calc(var(--s) * 6px);
+  bottom: calc(var(--s) * 6px);
+  background: var(--panel);
+  padding: calc(var(--s) * 3px) calc(var(--s) * 5px);
+  font-size: calc(var(--s) * 5px);
+}
+#overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(5, 10, 14, 0.62);
+  font-size: calc(var(--s) * 6px);
+}
+#overlay[hidden] { display: none; }
+.card {
+  background: var(--panel);
+  border: calc(var(--s) * 1px) solid #000;
+  box-shadow: 0 0 0 calc(var(--s) * 1px) #3a4a55 inset;
+  padding: calc(var(--s) * 10px) calc(var(--s) * 14px);
+  text-align: center;
+  max-width: 90%;
+}
+.card h1 {
+  font-size: calc(var(--s) * 18px);
+  color: var(--accent);
+  text-shadow: calc(var(--s) * 2px) calc(var(--s) * 2px) 0 #7a2e00;
+  margin-bottom: calc(var(--s) * 6px);
+  letter-spacing: calc(var(--s) * 1px);
+}
+.card h2 { font-size: calc(var(--s) * 9px); color: var(--accent); margin-bottom: calc(var(--s) * 6px); }
+.card p { line-height: 1.7; margin: calc(var(--s) * 4px) 0; color: #cfd8d6; }
+.card .big { font-size: calc(var(--s) * 12px); color: var(--fg); }
+.btn {
+  display: inline-block;
+  margin-top: calc(var(--s) * 8px);
+  font: inherit;
+  font-size: calc(var(--s) * 7px);
+  color: #111;
+  background: var(--accent);
+  border: calc(var(--s) * 1px) solid #000;
+  box-shadow: calc(var(--s) * 2px) calc(var(--s) * 2px) 0 #7a5a00;
+  padding: calc(var(--s) * 4px) calc(var(--s) * 8px);
+  cursor: pointer;
+}
+.btn:active { transform: translate(calc(var(--s) * 1px), calc(var(--s) * 1px)); box-shadow: none; }
+.controls {
+  display: grid;
+  grid-template-columns: auto auto auto;
+  gap: calc(var(--s) * 3px) calc(var(--s) * 8px);
+  margin: calc(var(--s) * 6px) auto 0;
+  text-align: left;
+  font-size: calc(var(--s) * 5px);
+  color: #cfd8d6;
+}
+.controls .h { color: var(--accent); }
+kbd {
+  font: inherit;
+  color: var(--fg);
+  background: #26343d;
+  padding: 0 calc(var(--s) * 2px);
+  border: calc(var(--s) * 0.5px) solid #5b6d78;
+}
+.stats { margin: calc(var(--s) * 6px) auto 0; border-collapse: collapse; font-size: calc(var(--s) * 5px); }
+.stats td { padding: calc(var(--s) * 1.5px) calc(var(--s) * 6px); }
+.stats td:nth-child(2) { color: #9fd3c7; }
