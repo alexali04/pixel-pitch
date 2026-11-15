@@ -7,7 +7,7 @@ A browser-based, pixel-art 11-vs-11 soccer game. No build step, no dependencies.
 Open `index.html` in a browser, or serve the folder:
 
 ```bash
-python3 -m http.server 8765
+python3 serve.py
 ```
 
 then visit http://localhost:8765.

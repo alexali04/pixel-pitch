@@ -119,8 +119,8 @@
 
     updateCamera(m, dt) {
       const b = m.ball;
-      const tx = b.x + (b.owner ? b.owner.vx * 0.35 : b.vx * 0.15);
-      const ty = b.y + (b.owner ? b.owner.vy * 0.25 : b.vy * 0.1);
+      const tx = b.rx + (b.owner ? b.owner.vx * 0.35 : b.vx * 0.15);
+      const ty = b.ry + (b.owner ? b.owner.vy * 0.25 : b.vy * 0.1);
       const k = Math.min(1, dt * 4.5);
       this.cam.x += (tx - this.cam.x) * k;
       this.cam.y += (ty - this.cam.y) * k;
@@ -129,9 +129,18 @@
       this.cam.y = U.clamp(this.cam.y, -M + hh + 3, C.H + M - hh - 3);
     }
 
-    draw(m, dt) {
+    // alpha = how far we are between the last two sim steps (displays faster than 60 Hz
+    // would otherwise show every position twice and fast balls stutter).
+    draw(m, dt, alpha = 1) {
       this.t += dt;
       const g = this.ctx;
+      const lerp = (o) => {
+        o.rx = o.ox == null ? o.x : o.ox + (o.x - o.ox) * alpha;
+        o.ry = o.oy == null ? o.y : o.oy + (o.y - o.oy) * alpha;
+      };
+      for (const p of m.players) lerp(p);
+      lerp(m.ball);
+      m.ball.rz = m.ball.oz == null ? m.ball.z : m.ball.oz + (m.ball.z - m.ball.oz) * alpha;
       this.updateCamera(m, dt);
       g.drawImage(this.pitch, this.sx(-M), this.sy(-M));
 
@@ -140,17 +149,17 @@
       // Shadows.
       g.fillStyle = 'rgba(0,0,0,0.3)';
       for (const p of m.players) {
-        const x = this.sx(p.x), y = this.sy(p.y);
+        const x = this.sx(p.rx), y = this.sy(p.ry);
         if (p.slide > 0 || p.dive > 0 || p.stun > 0) g.fillRect(x - 5, y - 1, 10, 2);
         else g.fillRect(x - 3, y - 1, 7, 2);
       }
       const b = m.ball;
-      const bs = Math.max(1, 3 - Math.floor(b.z));
-      g.fillRect(this.sx(b.x) - 1, this.sy(b.y), bs, 1);
+      const bs = Math.max(1, 3 - Math.floor(b.rz));
+      g.fillRect(this.sx(b.rx) - 1, this.sy(b.ry), bs, 1);
 
       // Depth-sorted sprites.
-      const list = m.players.map((p) => ({ y: p.y, p }));
-      list.push({ y: b.y + 0.05, ball: true });
+      const list = m.players.map((p) => ({ y: p.ry, p }));
+      list.push({ y: b.ry + 0.05, ball: true });
       list.sort((a, c) => a.y - c.y);
       for (const e of list) {
         if (e.ball) this.drawBall(b);
@@ -169,7 +178,7 @@
       const pv = m.preview, p = m.controlled;
       if (!pv || !p || !m.charging) return;
       const g = this.ctx;
-      const x0 = this.sx(p.x), y0 = this.sy(p.y), x1 = this.sx(pv.x), y1 = this.sy(pv.y);
+      const x0 = this.sx(p.rx), y0 = this.sy(p.ry), x1 = this.sx(pv.x), y1 = this.sy(pv.y);
       const len = Math.hypot(x1 - x0, y1 - y0);
       const n = Math.max(1, Math.floor(len));
       const col = pv.lofted ? '#9fd3ff' : '#ffffff';
@@ -186,9 +195,10 @@
       // landing marker: an X in space, a ring under a teammate
       g.fillStyle = col;
       if (pv.target) {
-        const tx = this.sx(pv.target.x), ty = this.sy(pv.target.y);
+        const tx = this.sx(pv.target.rx), ty = this.sy(pv.target.ry);
         g.fillRect(tx - 4, ty + 1, 9, 1); g.fillRect(tx - 3, ty + 2, 7, 1); g.fillRect(tx - 4, ty, 1, 1); g.fillRect(tx + 4, ty, 1, 1);
       }
+      if (pv.short) g.fillStyle = '#e4572e'; // too soft to reach the teammate: it stops here
       for (let k = -2; k <= 2; k++) { g.fillRect(x1 + k, y1 + k, 1, 1); g.fillRect(x1 + k, y1 - k, 1, 1); }
     }
 
@@ -235,7 +245,7 @@
     drawPlayer(p, m) {
       const g = this.ctx;
       const kit = p.isGK ? p.team.gkKit : p.team.kit;
-      const x = this.sx(p.x), y = this.sy(p.y);
+      const x = this.sx(p.rx), y = this.sy(p.ry);
       const pal = { H: p.look.hair, S: p.look.skin, T: kit.shirt, t: kit.shade, P: kit.shorts, K: kit.socks, B: '#151515' };
 
       if (p.slide > 0 || p.dive > 0 || p.stun > 0.25) { this.drawLying(p, x, y, pal); return; }
@@ -258,7 +268,7 @@
       if (p.isGK) { g.fillStyle = '#f4f4f4'; g.fillRect(ox, oy + 6, 1, 1); g.fillRect(ox + 6, oy + 6, 1, 1); }
       // holding off a defender: arm out towards them
       if (p.shielding) {
-        const sx = this.sx(p.shielding.x) < x ? ox - 2 : ox + 7;
+        const sx = this.sx(p.shielding.rx) < x ? ox - 2 : ox + 7;
         g.fillStyle = pal.T; g.fillRect(sx + (sx < x ? 1 : 0), oy + 5, 1, 1);
         g.fillStyle = pal.S; g.fillRect(sx + (sx < x ? 0 : 1), oy + 5, 1, 1);
       }
@@ -282,7 +292,7 @@
 
     drawBall(b) {
       const g = this.ctx;
-      const x = this.sx(b.x) - 1, y = this.sy(b.y, b.z) - 2;
+      const x = this.sx(b.rx) - 1, y = this.sy(b.ry, b.rz) - 2;
       g.fillStyle = '#111'; g.fillRect(x - 1, y, 5, 3); g.fillRect(x, y - 1, 3, 5);
       g.fillStyle = '#ffffff'; g.fillRect(x, y, 3, 3);
       g.fillStyle = '#333'; g.fillRect(x + ((Math.floor((b.x + b.y) * 3) & 1) ? 0 : 2), y + 1, 1, 1);
@@ -291,7 +301,7 @@
     drawMarkers(m) {
       const g = this.ctx, p = m.controlled;
       if (!p) return;
-      const x = this.sx(p.x), y = this.sy(p.y);
+      const x = this.sx(p.rx), y = this.sy(p.ry);
       const bob = Math.floor(this.t * 4) % 2;
       g.fillStyle = '#000';
       g.fillRect(x - 3, y - 19 + bob, 7, 1);

@@ -141,7 +141,7 @@
       I.endStep();
     }
 
-    if (match) R.draw(match, dt); else R.drawIdle(dt);
+    if (match) R.draw(match, dt, screen === 'match' ? acc / C.DT : 1); else R.drawIdle(dt);
     updateHud();
     requestAnimationFrame(frame);
   }

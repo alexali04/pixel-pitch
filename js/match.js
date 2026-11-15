@@ -122,6 +122,9 @@
       this.charging = false; this.charge = 0;
       if (team.isUser) this.controlled = taker;
       else this.controlled = this.bestDefender(bx, by);
+      // teleports: don't interpolate across them
+      for (const q of this.players) { q.ox = q.x; q.oy = q.y; }
+      b.ox = b.x; b.oy = b.y; b.oz = b.z;
       const names = { throw: 'Throw-in', corner: 'Corner', goalkick: 'Goal kick' };
       if (names[kind]) this.say(names[kind], 1.1);
     }
@@ -158,7 +161,9 @@
     }
 
     // Kick the ball towards a world point. Error grows with distance (stats refine this in stage 3).
-    kickTo(p, tx, ty, lofted, type, target, power = null) {
+    // v0 (ground passes only) = exact kick speed chosen by the user; otherwise the speed is
+    // picked so the ball arrives at a sensible pace.
+    kickTo(p, tx, ty, lofted, type, target, power = null, v0 = null) {
       const b = this.ball;
       const D0 = Math.max(1, U.dist(b.x, b.y, tx, ty));
       const skill = (lofted ? p.stats.longPass : p.stats.shortPass) / 100;
@@ -171,8 +176,7 @@
         const s = (Dl * C.AIR_K) / (1 - Math.exp(-C.AIR_K * T));
         b.vx = dir.x * s; b.vy = dir.y * s; b.vz = (C.G * T) / 2;
       } else {
-        const arrive = power == null ? Match.arrivalSpeed(D) : 2.5 + power * 11.5;
-        const s = Ball.groundSpeedFor(D, arrive);
+        const s = v0 != null ? v0 * (1 + U.gauss() * 0.03 * (1.6 - skill)) : Ball.groundSpeedFor(D, Match.arrivalSpeed(D));
         b.vx = dir.x * s; b.vy = dir.y * s; b.vz = 0;
       }
       b.z = Math.max(b.z, 0.01 * (lofted ? 1 : 0));
@@ -180,12 +184,13 @@
     }
 
     // Where a pass to q should be aimed, leading their run.
-    leadPoint(p, q, lofted, power = null) {
+    leadPoint(p, q, lofted, power = null, v0 = null) {
       let tx = q.x, ty = q.y;
       for (let i = 0; i < 2; i++) {
         const D = U.dist(p.x, p.y, tx, ty);
         const t = lofted ? Ball.loftTime(D) * (power == null ? 1 : 1.3 - power * 0.55)
-          : Ball.groundTime(D, power == null ? Match.arrivalSpeed(D) : 2.5 + power * 11.5);
+          : v0 != null ? (Ball.rollTime(v0, D) ?? Ball.groundRun(v0, 0).t)
+          : Ball.groundTime(D, Match.arrivalSpeed(D));
         tx = q.x + q.vx * t * 0.8; ty = q.y + q.vy * t * 0.8;
       }
       return { x: U.clamp(tx, 0.5, C.W - 0.5), y: U.clamp(ty, 0.5, C.H - 0.5) };
@@ -202,9 +207,25 @@
       if (!dx && !dy) { dx = p.fx; dy = p.fy; }
       const n = U.norm(dx, dy);
       const target = this.findPassTarget(p, n.x, n.y, lofted);
-      if (target) { const t = this.leadPoint(p, target, lofted, power); return { target, x: t.x, y: t.y, lofted }; }
-      const D = lofted ? 16 + power * 34 : 7 + power * 23;
-      return { target: null, x: U.clamp(p.x + n.x * D, 1, C.W - 1), y: U.clamp(p.y + n.y * D, 1, C.H - 1), lofted };
+      if (lofted) {
+        if (target) { const t = this.leadPoint(p, target, true, power); return { target, x: t.x, y: t.y, aimX: t.x, aimY: t.y, lofted }; }
+        const D = 16 + power * 34;
+        const x = U.clamp(p.x + n.x * D, 1, C.W - 1), y = U.clamp(p.y + n.y * D, 1, C.H - 1);
+        return { target: null, x, y, aimX: x, aimY: y, lofted };
+      }
+      // Ground pass: the button sets the kick speed; the line ends where the ball will get to.
+      const v0 = Match.userGroundSpeed(power);
+      const reach = Ball.rollDist(v0);
+      let aimX, aimY;
+      if (target) { const t = this.leadPoint(p, target, false, null, v0); aimX = t.x; aimY = t.y; }
+      else { aimX = p.x + n.x * reach; aimY = p.y + n.y * reach; }
+      const d = U.norm(aimX - p.x, aimY - p.y);
+      const D = Math.min(U.dist(p.x, p.y, aimX, aimY), reach);
+      return {
+        target, v0, lofted, short: !!target && U.dist(p.x, p.y, aimX, aimY) > reach,
+        aimX, aimY,
+        x: U.clamp(p.x + d.x * D, 0.5, C.W - 0.5), y: U.clamp(p.y + d.y * D, 0.5, C.H - 0.5),
+      };
     }
 
     // aimY in [-1, 1] picks the vertical spot in the goal mouth; power in [0, 1].
@@ -317,11 +338,15 @@
     userPass(p, ix, iy, lofted, power = 0.5) {
       const plan = this.passPlan(p, ix, iy, lofted, power);
       this.latch = this.time + 0.8;
-      if (plan.target) {
+      if (!lofted) {
+        this.kickTo(p, plan.aimX, plan.aimY, false, 'pass', plan.target, null, plan.v0);
+        const c = plan.target || this.nearestUser(plan.x, plan.y, null);
+        if (c) { this.controlled = c; c.receiving = { t: this.time }; }
+      } else if (plan.target) {
         this.passTo(p, plan.target, lofted, power);
         this.controlled = plan.target;
       } else {
-        this.kickTo(p, plan.x, plan.y, lofted, 'pass', null, lofted ? power : 0.35);
+        this.kickTo(p, plan.x, plan.y, lofted, 'pass', null, power);
         const c = this.nearestUser(plan.x, plan.y, null);
         if (c) { this.controlled = c; c.receiving = { t: this.time }; }
       }
@@ -376,7 +401,7 @@
         }
         this.preview = null;
         if (this.charging) {
-          const fill = this.chargeKind === 'shot' ? 0.9 : 0.7;
+          const fill = this.chargeKind === 'shot' ? 0.9 : 0.45;
           if (I.down(this.chargeBtn)) this.charge = Math.min(1, this.charge + dt / fill);
           if (this.chargeKind !== 'shot') this.preview = this.passPlan(p, ax.x, ax.y, this.chargeKind === 'lob', this.charge);
           if (I.released(this.chargeBtn) || !I.down(this.chargeBtn)) {
@@ -440,6 +465,8 @@
 
     step(dt, I) {
       this.time += dt;
+      for (const p of this.players) { p.ox = p.x; p.oy = p.y; }
+      const b0 = this.ball; b0.ox = b0.x; b0.oy = b0.y; b0.oz = b0.z;
       if (this.banner) { this.banner.t -= dt; if (this.banner.t <= 0) this.banner = null; }
       if (this.state === 'halftime' || this.state === 'fulltime') return;
 
@@ -677,6 +704,8 @@
   }
 
   // Ground passes arrive firm: longer passes arrive faster.
+  // User ground passes: tap = 6 m/s (a nudge, ~6m), full = 32 m/s (a rocket).
+  Match.userGroundSpeed = (power) => 6 + U.clamp(power, 0, 1) * 26;
   Match.arrivalSpeed = (D) => U.clamp(5 + D * 0.15, 5, 10.5);
 
   PP.Match = Match;

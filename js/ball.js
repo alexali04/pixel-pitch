@@ -71,6 +71,17 @@
     }
     return (lo + hi) / 2;
   };
+  // Time for a ball rolled at v0 to cover D metres, or null if it stops short.
+  Ball.rollTime = (v0, D) => {
+    if (Ball.groundRun(v0, 0).d < D) return null;
+    let lo = 0, hi = v0;
+    for (let i = 0; i < 30; i++) {
+      const m = (lo + hi) / 2;
+      if (Ball.groundRun(v0, m).d > D) lo = m; else hi = m;
+    }
+    return Ball.groundRun(v0, (lo + hi) / 2).t;
+  };
+  Ball.rollDist = (v0) => Ball.groundRun(v0, 0).d;
   Ball.groundTime = (D, v1) => Ball.groundRun(Ball.groundSpeedFor(D, v1), v1).t;
   Ball.loftTime = (D) => 0.8 + D / 24;
 
