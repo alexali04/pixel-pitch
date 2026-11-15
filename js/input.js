@@ -6,8 +6,8 @@
     right: ['ArrowRight', 'KeyD'],
     sprint: ['ShiftLeft', 'ShiftRight'],
     pass: ['KeyJ', 'KeyZ'],
-    lob: ['KeyK', 'KeyX', 'Mouse2'],
-    shoot: ['Space', 'KeyC', 'Mouse0'],
+    lob: ['KeyK', 'KeyX'],
+    shoot: ['Space', 'KeyC'],
     shootOnly: ['KeyL'],
     start: ['Enter', 'NumpadEnter'],
     pause: ['KeyP', 'Escape'],
@@ -16,6 +16,7 @@
     mute: ['KeyM'],
   };
   const GAME_KEYS = new Set(Object.values(BIND).flat());
+  const BIND_LOB = [...BIND.lob, 'Mouse2'], BIND_CLICK = ['Mouse0'];
 
   const I = (PP.Input = {
     keys: {}, pr: {}, rel: {},
@@ -32,21 +33,40 @@
         this.rel[e.code] = true;
       });
       addEventListener('blur', () => { this.keys = {}; });
-      // Mouse: position (canvas pixels) for mouse aiming; buttons as virtual keys.
-      const cv = document.getElementById('game');
-      this.mouse = null;
+      // Mouse: position (canvas pixels) for pointer aiming, or raw movement while the pointer
+      // is locked (relative aiming); buttons as virtual keys.
+      const cv = (this.canvas = document.getElementById('game'));
+      this.mouse = null; this.mdx = 0; this.mdy = 0;
       cv.addEventListener('mousemove', (e) => {
+        if (this.locked()) { this.mdx += e.movementX; this.mdy += e.movementY; return; }
         const r = cv.getBoundingClientRect();
         this.mouse = { x: ((e.clientX - r.left) / r.width) * cv.width, y: ((e.clientY - r.top) / r.height) * cv.height };
       });
       cv.addEventListener('mouseleave', () => { this.mouse = null; });
-      cv.addEventListener('mousedown', (e) => { const k = 'Mouse' + e.button; if (!this.keys[k]) this.pr[k] = true; this.keys[k] = true; e.preventDefault(); });
+      cv.addEventListener('mousedown', (e) => {
+        e.preventDefault();
+        if (this.wantLock && this.wantLock() && !this.locked()) { this.lock(); return; } // first click just grabs the mouse
+        const k = 'Mouse' + e.button; if (!this.keys[k]) this.pr[k] = true; this.keys[k] = true;
+      });
       addEventListener('mouseup', (e) => { const k = 'Mouse' + e.button; if (this.keys[k]) this.rel[k] = true; this.keys[k] = false; });
       cv.addEventListener('contextmenu', (e) => e.preventDefault());
     },
-    down(a) { return BIND[a].some((k) => this.keys[k]); },
-    hit(a) { return BIND[a].some((k) => this.pr[k]); },
-    released(a) { return BIND[a].some((k) => this.rel[k]); },
+    locked() { return document.pointerLockElement === this.canvas; },
+    lock() {
+      try { const r = this.canvas.requestPointerLock(); if (r && r.catch) r.catch(() => {}); } catch (e) { /* not allowed yet */ }
+    },
+    unlock() { if (this.locked()) document.exitPointerLock(); },
+    takeMouseDelta() { const d = { x: this.mdx, y: this.mdy }; this.mdx = 0; this.mdy = 0; return d; },
+    // Mouse buttons: left = 'click' (shot if you click the goal, else a pass; tackle on
+    // defence), right = lofted.
+    bind(a) {
+      if (a === 'lob') return BIND_LOB;
+      if (a === 'click') return BIND_CLICK;
+      return BIND[a];
+    },
+    down(a) { return this.bind(a).some((k) => this.keys[k]); },
+    hit(a) { return this.bind(a).some((k) => this.pr[k]); },
+    released(a) { return this.bind(a).some((k) => this.rel[k]); },
     axis() {
       let x = (this.down('right') ? 1 : 0) - (this.down('left') ? 1 : 0);
       let y = (this.down('down') ? 1 : 0) - (this.down('up') ? 1 : 0);

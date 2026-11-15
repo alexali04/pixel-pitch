@@ -46,13 +46,26 @@ Keepers holding the ball: **J** rolls it out, **K** / **Space** kicks it.
 
 ## Smoothness controls
 
-**Aim with**: *Team-mate targeting* (default) — the direction you hold picks a team-mate and the
-pass leads his run, so no fine angle steering is needed; *Free aim* — the keys turn the aim;
-*Mouse* — the mouse aims. Only real goals count: there are no offscreen goals.
+**Aim with**: *Free aim* (default) — the keys turn the aim; *Team-mate targeting* — the direction
+you hold picks a team-mate and the pass leads his run; *Mouse pointer* — the crosshair under the
+cursor is where you aim; *Mouse (locked)* — like a first-person game: click the pitch to grab the
+mouse, which is hidden, and moving it pushes a crosshair around the ball (Esc lets go and pauses).
+Only real goals count: there are no offscreen goals.
 
-On the title screen or pause menu: **Pass assist** (off / light / strong), **Aim with** (direction
-keys / mouse), **Key aim speed**, **Auto-tackle**, **Auto-sprint on defence**. With mouse aim the
-keys only move your player; point to aim passes and shots, left click = Space, right click = K.
+On the title screen or pause menu: **Pass assist** (off / light / strong), **Aim with**, **Key aim
+speed**, **Mouse sensitivity** (locked mouse), **Auto-tackle**, **Auto-sprint on defence**. With
+mouse aim the keys only move your player. **Left click** is one action: click on the goal mouth to
+shoot there, anywhere else to pass there (hold to strike harder); on defence it tackles. **Right
+click** is lofted: a chip if you click the goal from close in, otherwise a floated pass.
+
+The ball goes where your body allows: while you wind up, your player turns towards the aim (quick
+standing, slow at a sprint) and can only strike ~77° across his body at full speed (~109° standing),
+so the preview line can lag the crosshair until he's turned.
+
+Lofted balls carry backspin: they climb, hang, slow in the air and drop steeply, then check up on
+the bounce. Chips have the most; keepers' kicks the least.
+**Tactics — Forwards on defence**: *drop back and help* (wingers track back, the striker screens;
+deeper the nearer the ball is to your goal) or *stay high for the counter*. CPU teams pick by style.
 **Defending assist** (when idle / always / off): your controlled defender takes up his AI role —
 press, cover, mark, or go to where a lofted ball will land — whenever you're not steering (or
 always, with your keys nudging him).
@@ -105,7 +118,7 @@ Sprinting with the ball means bigger touches that defenders can nick.
 | dribbling / strength | size of sprint touches; resisting tackles and shielding |
 | first touch | how quickly a pass is brought under control |
 | tackling | tackle success |
-| positioning | how quickly a defender tracks shape shifts (poor = lags and drifts) |
+| positioning | how quickly a defender tracks shape shifts (poor = lags and drifts); with composure + vision, how well forwards time runs (wait for the passer, bend along the line, check early runs) |
 | marking | how tightly a defender picks up the nearest attacker |
 | heading | header accuracy and power |
 | reflexes / diving / handling / GK positioning | saves, dive reach and speed, catching vs parrying, smothering 1v1s |

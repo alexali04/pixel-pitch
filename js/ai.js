@@ -3,6 +3,9 @@
   const AI = (PP.AI = {});
   const ATTACKERS = new Set(['ST', 'LW', 'RW', 'AM']);
 
+  // Shape knobs (attack back-line gap behind the ball, its max depth, full-back push, recovery runs).
+  AI.TUNE = { backGap: 0.19, backMax: 0.62, fbPush: true, recover: true };
+
   // Defensive blocks. Depths are fractions of pitch length from our own goal, widths are
   // fractions of the formation's width.
   //   line      back-line depth with the ball around halfway (low ~18m, mid ~33m, high ~46m)
@@ -187,17 +190,38 @@
       // Positioning: good positional players track shape shifts quickly; poor ones lag and drift.
       const pos = p.stats.positioning / 100;
       if (p.tgx == null || m.state !== 'play') { p.tgx = raw.x; p.tgy = raw.y; }
-      const k = Math.min(1, dt * (1.5 + pos * 6));
+      // Runs are decisive, and so is dropping back: a deeper target is taken up at once.
+      const dropping = AI.TUNE.recover && phase === 'defend' && team.depth(raw.x) < team.depth(p.tgx) - 0.01;
+      const k = Math.min(1, dt * (raw.sprint ? 12 : dropping ? 5 + pos * 4 : 1.5 + pos * 6));
       p.tgx += (raw.x - p.tgx) * k; p.tgy += (raw.y - p.tgy) * k;
       const wob = (1 - pos) * 2.2;
       const tg = { x: p.tgx + Math.sin(m.time * 0.5 + p.idx * 1.7) * wob, y: p.tgy + Math.cos(m.time * 0.4 + p.idx * 2.3) * wob, sprint: raw.sprint };
       if (phase === 'defend' && m.state === 'play') AI.mark(m, team, p, tg);
       const d = U.dist(p.x, p.y, tg.x, tg.y);
       // Recovery: caught upfield of the ball after losing it -> sprint back into shape.
-      const upfield = phase === 'defend' && team.depth(p.x) > team.depth(b.x) + 0.02;
-      p.steer(tg.x, tg.y, d > 9 || tg.sprint || (upfield && d > 3), 2.5);
+      const stayUp = AI.fwdDefend(team) === 'high' && (p.slot.role === 'ST' || p.slot.role === 'LW' || p.slot.role === 'RW');
+      // Recovery: anyone with ground to make up towards our goal sprints back, defenders soonest.
+      const backRole = p.slot.role === 'CB' || p.slot.role === 'LB' || p.slot.role === 'RB' || p.slot.role === 'DM';
+      const behindBy = team.depth(p.x) - team.depth(tg.x);
+      const recover = AI.TUNE.recover && phase === 'defend' && !stayUp && behindBy > (backRole ? 0.025 : 0.05);
+      const upfield = phase === 'defend' && !stayUp && team.depth(p.x) > team.depth(b.x) + 0.02;
+      p.steer(tg.x, tg.y, d > 9 || tg.sprint || recover || (upfield && d > 3), 2.5);
       if (d < 1.5) p.face(b.x, b.y);
     }
+  };
+
+  // Do this team's forwards drop back on defence ('help') or stay up for the counter ('high')?
+  // The user picks it; CPU teams by style (press teams keep their front line high).
+  AI.fwdDefend = function (team) {
+    if (team.isUser) return PP.settings.fwdDefend || 'help';
+    return team.style.fwdDefend || (team.block === 'high' ? 'high' : 'help');
+  };
+
+  // How well a forward times his runs: reads the passer, holds the line, checks a run that's
+  // too early. 0..1.
+  AI.runIQ = function (p) {
+    const st = p.stats;
+    return U.clamp((st.positioning * 0.45 + st.composure * 0.3 + st.vision * 0.25 - 45) / 45, 0, 1);
   };
 
   // Positional target for an off-ball player.
@@ -212,19 +236,53 @@
     } else if (m.state === 'restart' && r.kind === 'corner') {
       return AI.cornerTarget(m, team, p);
     } else if (phase === 'attack') {
-      // The whole team moves with the ball: the back line sits ~28m behind it.
-      const back = U.clamp(ballD - 0.27, 0.07, 0.55);
+      // The whole team moves with the ball: the back line squeezes up to ~20m behind it so
+      // the centre-backs stay in the passing game, and the full-backs push on, highest on the
+      // ball's side (overlaps / underlaps once we're in their half).
+      const back = U.clamp(ballD - AI.TUNE.backGap, 0.07, AI.TUNE.backMax);
       d = back + (s.d - 0.17) * 0.92;
       l = 0.5 + (s.l - 0.5) * 1.1 + (bl - 0.5) * 0.22;
+      if (AI.TUNE.fbPush && (s.role === 'LB' || s.role === 'RB')) {
+        const ballSide = Math.abs(bl - s.l) < 0.4;
+        d += 0.04 + (ballSide && ballD > 0.45 ? 0.08 : 0);
+      }
       const o0 = b.owner;
       const carrierLooking = o0 && o0.team === team && o0.fx * team.dir > 0.4 && m.pressureOn(o0) < 0.5;
       if (ATTACKERS.has(s.role) && m.state === 'play') {
-        // Runs in behind: much likelier when the carrier is facing forward with time on the ball.
-        const rate = carrierLooking ? 1.1 : 0.3;
-        if (m.time > p.runUntil + 1.2 && Math.random() < C.DT * rate) p.runUntil = m.time + U.rand(1.2, 2.0);
-        if (m.time < p.runUntil) { d = Math.max(d, lineD + 0.05); sprint = true; }
+        // Runs in behind. The cue is a carrier who can play it: facing forward with time,
+        // in control, within range, or (for the user) winding up a pass. Good runners wait for
+        // that cue, bend along the line to stay onside, and check a run if the moment goes.
+        // Poor ones go whenever, straight through, and get caught offside.
+        const iq = AI.runIQ(p);
+        const mine = o0 && o0.team === team && o0 !== p;
+        const winding = mine && m.controlled === o0 && m.charging && m.chargeKind !== 'shot';
+        const ready = mine && (winding || (carrierLooking && m.time >= (o0.settleUntil || 0))) && U.dist(o0.x, o0.y, p.x, p.y) < 40;
+        if (m.time > p.runUntil + 1.2) {
+          const rate = ready ? (winding ? 2.5 : 0.5) + 1.5 * iq : 0.15 + 0.6 * (1 - iq);
+          if (Math.random() < C.DT * rate) {
+            p.runUntil = m.time + U.rand(1.2, 2.0); p.runStart = m.time;
+            p.runBend = (Math.random() < 0.5 ? -1 : 1) * (0.06 + 0.06 * iq);
+          }
+        }
+        if (m.time < p.runUntil) {
+          const lk = b.lastKick, since = m.time - p.runStart;
+          const passGone = !b.owner && lk && lk.team === team && lk.type === 'pass' && m.time - lk.t < 1.5;
+          const onside = team.depth(p.x) < lineD - 0.004;
+          // First stretch runs across the line, onside; a good runner keeps bending along it
+          // for as long as you're winding up the pass, then bursts as it's played.
+          const hold = !passGone && (winding && iq > 0.5 ? true : since < 0.15 + 0.4 * iq);
+          if (!passGone && !ready && onside && iq > 0.4 && since > 0.2 && Math.random() < C.DT * 6 * iq) p.runUntil = m.time; // check it
+          else if (hold) {
+            d = lineD - 0.008; l += p.runBend || 0; sprint = true;
+            if (winding) p.runUntil = Math.max(p.runUntil, m.time + 0.8);
+          } else { d = Math.max(d, lineD + 0.06); l += (p.runBend || 0) * 0.5; sprint = true; }
+        }
       }
-      if (!sprint) d = Math.min(d, lineD - 0.01);
+      if (!sprint) {
+        // Stranded offside: good forwards hurry back onside, poor ones amble.
+        if (ATTACKERS.has(s.role) && team.depth(p.x) > lineD && AI.runIQ(p) > 0.5) sprint = true;
+        d = Math.min(d, lineD - 0.01);
+      }
       if (!sprint && o0 && o0.team === team && o0 !== p && m.state === 'play' && s.role !== 'CB') {
         // Get open: nudge towards the nearby spot furthest from defenders with a clear lane.
         if (!p.openUntil || m.time > p.openUntil) {
@@ -249,12 +307,20 @@
       const B = AI.BLOCKS[team.block || 'mid'], comp = team.compact ?? 0.5;
       let line = B.line + (ballD - 0.5) * 0.18;                // breathe with the ball
       const sinceLost = team.lostAt != null ? m.time - team.lostAt : 99;
-      if (sinceLost < 4 && !(team.block === 'high' && sinceLost < 2.5)) line -= 0.06 * (1 - sinceLost / 4); // retreat after losing it
+      if (sinceLost < 4 && !(team.block === 'high' && sinceLost < 2.5)) line -= 0.1 * (1 - sinceLost / 4); // retreat after losing it
       line = Math.min(line, ballD - 0.07);                      // stay goal-side of it
       line = Math.min(line, AI.runnerDepth(m, team) - 0.01);     // drop off with runners
       line = Math.max(line, 0.055);
       let tier = TIER[s.role] ?? 0.5;
-      if (team.block === 'low' && (s.role === 'LW' || s.role === 'RW')) tier = 0.55; // wingers drop in
+      const wide = s.role === 'LW' || s.role === 'RW';
+      if (AI.fwdDefend(team) === 'help') {
+        // Forwards drop back: wingers fill in beside midfield, the striker screens the holding midfielder.
+        // The deeper the ball, the deeper they come: wingers end up tracking the full-backs.
+        const deep = U.clamp((0.5 - ballD) / 0.3, 0, 1);
+        if (wide) tier = (team.block === 'low' ? 0.45 : 0.52) - 0.3 * deep;
+        else if (s.role === 'ST') tier = 0.8 - 0.2 * deep;
+        else if (s.role === 'AM') tier = 0.6 - 0.2 * deep;
+      } else if (wide || s.role === 'ST') tier += 0.35; // stay up, ready for the counter
       d = line + tier * B.len * (1.2 - 0.4 * comp);
       l = 0.5 + (s.l - 0.5) * B.width * (1.18 - 0.36 * comp) + (bl - 0.5) * B.shift;
     }
@@ -335,9 +401,10 @@
     const ty = owner.y + dir.y * dist + owner.vy * 0.25;
     const d = U.dist(p.x, p.y, owner.x, owner.y);
     p.steer(tx, ty, d > 13 || hurry, 2.5); // close down at a jog unless far away
-    if (d < (team.isUser ? 2.4 : 1.6) && p.tackleCd <= 0 && m.time > m.ball.protectUntil) {
-      p.tackleCd = U.rand(1.0, 1.8);
-      if (Math.random() < 0.6) m.startLunge(p, owner, 0.24);
+    const settling = m.time < (owner.settleUntil || 0);
+    if (d < (team.isUser ? 2.4 : settling ? 2.2 : 1.6) && p.tackleCd <= 0 && (settling || m.time > m.ball.protectUntil)) {
+      p.tackleCd = settling ? U.rand(0.4, 0.7) : U.rand(1.0, 1.8);
+      if (Math.random() < (settling ? 0.85 : 0.6)) m.startLunge(p, owner, settling ? 0.18 : 0.24);
     }
   };
 

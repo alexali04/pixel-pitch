@@ -7,6 +7,13 @@
   const $ = (id) => document.getElementById(id);
   const R = new PP.Renderer(cv);
   I.init();
+  // Locked-mouse aiming: grab the pointer during play, let it go on every menu.
+  const lockMode = () => PP.settings.aim === 'mouselock';
+  I.wantLock = () => lockMode() && screen === 'match';
+  const grab = () => { if (lockMode()) I.lock(); };
+  document.addEventListener('pointerlockchange', () => {
+    if (!I.locked() && screen === 'match' && lockMode() && match && match.state !== 'halftime' && match.state !== 'fulltime') pause();
+  });
 
   let match = null;
   const settings = { fullCourt: false };
@@ -83,6 +90,7 @@
     hud.hidden = false;
     hide();
     screen = 'match';
+    grab();
   }
 
   function statsTable(m) {
@@ -98,14 +106,14 @@
   }
 
   function halftime() {
-    screen = 'halftime';
+    screen = 'halftime'; I.unlock();
     show(`<h2>Half time</h2><p class="big">${match.home.short} ${match.score[0]} - ${match.score[1]} ${match.away.short}</p>
       ${statsTable(match)}<button class="btn">Second half (Enter)</button>`, secondHalf);
   }
-  function secondHalf() { match.startSecondHalf(); hide(); screen = 'match'; }
+  function secondHalf() { match.startSecondHalf(); hide(); screen = 'match'; grab(); }
 
   function fulltime() {
-    screen = 'fulltime';
+    screen = 'fulltime'; I.unlock();
     const [a, b] = match.score;
     const res = a > b ? 'You win!' : a < b ? 'You lose' : 'Draw';
     show(`<h2>Full time — ${res}</h2><p class="big">${match.home.short} ${a} - ${b} ${match.away.short}</p>
@@ -131,10 +139,11 @@
   function smoothnessCard(back) {
     const rows = Object.keys(PP.SETTING_LABELS).map((k) => {
       const opts = PP.SETTING_OPTIONS[k], cur = opts.find((o) => o[0] === PP.settings[k]) || opts[0];
-      return `<tr data-k="${k}" class="opt"><td>${PP.SETTING_LABELS[k]}</td><td><button class="btn toggle">${cur[1]}</button></td></tr>`;
+      const head = k === 'fwdDefend' ? '<tr><td colspan="2"><b>Tactics</b></td></tr>' : '';
+      return `${head}<tr data-k="${k}" class="opt"><td>${PP.SETTING_LABELS[k]}</td><td><button class="btn toggle">${cur[1]}</button></td></tr>`;
     }).join('');
     show(`<h2>Smoothness</h2><table class="stats smooth">${rows}</table>
-      <p class="hint">Click to change. Mouse aim: point to aim passes/shots, left click = Space, right click = K.</p>
+      <p class="hint">Click to change. Mouse pointer: the crosshair is where you aim. Mouse (locked): like a first-person game, the pointer is hidden and moving the mouse pushes a crosshair around the ball (click the pitch to grab the mouse, Esc to let go). Keys still move your player.</p>
       <button class="btn" id="smBack">Back</button>`);
     overlay.querySelectorAll('tr.opt').forEach((tr) => tr.addEventListener('click', () => {
       const k = tr.dataset.k, opts = PP.SETTING_OPTIONS[k];
@@ -147,12 +156,12 @@
   }
 
   function pause() {
-    screen = 'paused';
+    screen = 'paused'; I.unlock();
     show(`<h2>Paused</h2>${squadTable(match.home)}${CONTROLS}<button class="btn" id="resBtn">Resume (Enter / P)</button> <button class="btn toggle" id="smBtn">Smoothness</button>`);
     $('resBtn').addEventListener('click', resume);
     $('smBtn').addEventListener('click', () => smoothnessCard(pause));
   }
-  function resume() { hide(); screen = 'match'; }
+  function resume() { hide(); screen = 'match'; grab(); }
 
   function updateHud() {
     if (!match) return;
@@ -183,6 +192,8 @@
       else {
         acc += dt;
         match.mouseWorld = I.mouse ? R.screenToWorld(I.mouse.x, I.mouse.y) : null;
+        const md = I.takeMouseDelta();
+        if (lockMode() && I.locked() && (md.x || md.y)) match.nudgeMouse(md.x, md.y);
         while (acc >= C.DT) {
           match.step(C.DT, I);
           I.endStep();

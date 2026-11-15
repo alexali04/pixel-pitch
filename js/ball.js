@@ -9,6 +9,7 @@
       this.vx = 0; this.vy = 0; this.vz = 0;
       this.px = x; this.py = y; this.pz = 0;
       this.curve = 0;
+      this.back = 0;   // backspin (0..1): lift and extra drag in the air, checks up on landing
       this.owner = null;
       this.lastTouch = null;
       this.lastKick = null;
@@ -24,7 +25,7 @@
 
     // Future positions of the loose ball, n samples spaced dt apart.
     predict(n, dt) {
-      const b = { x: this.x, y: this.y, z: this.z, vx: this.vx, vy: this.vy, vz: this.vz, curve: this.curve || 0 };
+      const b = { x: this.x, y: this.y, z: this.z, vx: this.vx, vy: this.vy, vz: this.vz, curve: this.curve || 0, back: this.back || 0 };
       const out = [];
       for (let i = 0; i < n; i++) {
         Ball.integrate(b, dt);
@@ -44,17 +45,16 @@
         b.curve *= Math.exp(-0.5 * dt);
       }
       if (b.z > 0.001 || b.vz > 0.001) {
-        b.vz -= C.G * dt;
-        const f = Math.exp(-C.AIR_K * dt);
-        b.vx *= f; b.vy *= f;
-        b.x += b.vx * dt; b.y += b.vy * dt; b.z += b.vz * dt;
+        const bk = Ball.airStep(b, dt);
         if (b.z <= 0) {
           b.z = 0;
           if (b.vz < -1.5) {
-            const keep = b.vz > -3.5 ? 0.9 : 0.62; // a low skim skids on, a dropping ball checks up
-            b.vz = -b.vz * 0.4; b.vx *= keep; b.vy *= keep;
+            // A low skim skids on; a dropping ball checks up, more so with backspin.
+            const keep = b.vz > -3.5 ? 0.9 : 0.62 - 0.3 * bk;
+            b.vz = -b.vz * (0.4 - 0.12 * bk); b.vx *= keep; b.vy *= keep;
           }
           else b.vz = 0;
+          b.back = 0;
         }
       } else {
         b.z = 0; b.vz = 0;
@@ -68,6 +68,36 @@
       }
     }
   }
+
+  // One step in the air. Backspin gives lift that grows with speed (so a floated ball climbs,
+  // hangs, then drops steeply as it slows) plus extra drag. Returns the spin before the step.
+  Ball.LIFT = 0.3; Ball.SPIN_DRAG = 0.6; Ball.SPIN_DECAY = 0.3;
+  Ball.airStep = (b, dt) => {
+    const bk = b.back || 0;
+    if (bk) {
+      b.vz += Ball.LIFT * bk * Math.hypot(b.vx, b.vy) * dt;
+      b.back = bk * Math.exp(-Ball.SPIN_DECAY * dt);
+    }
+    b.vz -= C.G * dt;
+    const f = Math.exp(-(C.AIR_K + Ball.SPIN_DRAG * bk) * dt);
+    b.vx *= f; b.vy *= f;
+    b.x += b.vx * dt; b.y += b.vy * dt; b.z += b.vz * dt;
+    return bk;
+  };
+
+  // Launch for a ball in the air with backspin `back` to be D metres away, at height h, after
+  // T seconds: horizontal speed s and vertical speed vz (shooting method on the real physics).
+  Ball.loftLaunch = (D, T, back = 0, h = 0) => {
+    let s = (D * C.AIR_K) / (1 - Math.exp(-C.AIR_K * T)), vz = (h + 0.5 * C.G * T * T) / T;
+    const dt = 1 / 60, n = Math.max(1, Math.round(T / dt));
+    for (let it = 0; it < 8; it++) {
+      const b = { x: 0, y: 0, z: 0, vx: s, vy: 0, vz, back };
+      for (let i = 0; i < n; i++) Ball.airStep(b, dt);
+      s *= D / Math.max(0.1, b.x);
+      vz += (h - b.z) / T * 0.9;
+    }
+    return { s, vz };
+  };
 
   // Rolling ball from speed v0 slowing to v1: distance covered and time taken.
   Ball.groundRun = (v0, v1) => {

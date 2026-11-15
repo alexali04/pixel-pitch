@@ -234,10 +234,22 @@
       this.drawGoalFront(0); this.drawGoalFront(C.W);
       this.drawPreview(m);
       this.drawMarkers(m);
-      if (PP.settings.aim === 'mouse' && PP.Input.mouse) { // crosshair where the mouse is aiming
-        const g2 = this.ctx, mx = Math.round(PP.Input.mouse.x), my = Math.round(PP.Input.mouse.y);
-        g2.fillStyle = 'rgba(255,255,255,0.8)';
+      const cross = (mx, my, col) => {
+        const g2 = this.ctx; mx = Math.round(mx); my = Math.round(my);
+        g2.fillStyle = col;
         g2.fillRect(mx - 3, my, 2, 1); g2.fillRect(mx + 2, my, 2, 1); g2.fillRect(mx, my - 3, 1, 2); g2.fillRect(mx, my + 2, 1, 2);
+      };
+      if (PP.settings.aim === 'mouse' && PP.Input.mouse) cross(PP.Input.mouse.x, PP.Input.mouse.y, 'rgba(255,255,255,0.8)'); // where the mouse is aiming
+      if (PP.settings.aim === 'mouselock') {
+        if (!PP.Input.locked()) {
+          const g2 = this.ctx; g2.font = '8px monospace'; g2.textAlign = 'center';
+          g2.fillStyle = 'rgba(0,0,0,0.55)'; g2.fillRect(C.VIEW_W / 2 - 78, 26, 156, 11);
+          g2.fillStyle = '#fff'; g2.fillText('Click the pitch to aim with the mouse', C.VIEW_W / 2, 34);
+        } else if (m.mouseVec && m.controlled && b.owner === m.controlled) {
+          // Locked: the virtual crosshair rides with the ball.
+          const wx = b.rx + m.mouseVec.x, wy = U.clamp(b.ry + m.mouseVec.y, -2, C.H + 2);
+          cross(this.sx(wx, wy), this.sy(wy), m.charging ? '#ffd23f' : 'rgba(255,255,255,0.85)');
+        }
       }
       this.drawPopups(m);
       this.drawRadar(m);
