@@ -22,11 +22,16 @@ then visit http://localhost:8765.
 | K | lofted pass | slide tackle |
 | Space | shoot | standing tackle |
 | P / Esc | pause | pause |
+| R | restart the match | restart the match |
 
 Hold J / K / Space to set strength: tap = soft, hold = bullet (a bar shows above your player).
 
-You attack right to left. Control switches automatically to whoever has the ball,
-and to the nearest defender when the CPU wins it.
+While a pass button is held, a dashed line shows where the pass will go (an X in space,
+a ring under the teammate it's aimed at).
+
+You attack right to left. Control switches automatically to whoever has the ball, and
+when defending to the best-placed defender between the ball and your goal. Get close to
+the carrier and your defender pokes at the ball on their own; Space/K still tackle manually.
 
 ## Layout
 

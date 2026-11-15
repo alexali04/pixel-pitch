@@ -27,7 +27,7 @@
       <span class="h">Attack</span><span><kbd>J</kbd> pass &nbsp;<kbd>K</kbd> lofted</span><span><kbd>Space</kbd> shoot</span>
       <span class="h">Strength</span><span>hold the button</span><span>tap = soft, hold = bullet</span>
       <span class="h">Defend</span><span><kbd>J</kbd> switch &nbsp;<kbd>K</kbd> slide</span><span><kbd>Space</kbd> tackle</span>
-      <span class="h">Game</span><span><kbd>P</kbd> pause</span><span>aim with direction keys</span>
+      <span class="h">Game</span><span><kbd>P</kbd> pause &nbsp;<kbd>R</kbd> restart</span><span>aim with direction keys</span>
     </div>`;
 
   function show(html, onClick) {
@@ -116,6 +116,7 @@
     const dt = Math.min(0.1, (now - last) / 1000);
     last = now;
 
+    if (I.hit('restart') && screen !== 'title') { I.endStep(); startMatch(); }
     if (screen === 'match') {
       if (I.hit('pause')) { I.endStep(); pause(); }
       else {

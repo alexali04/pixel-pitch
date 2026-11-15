@@ -158,9 +158,38 @@
       }
 
       this.drawGoalFront(0); this.drawGoalFront(C.W);
+      this.drawPreview(m);
       this.drawMarkers(m);
       this.drawPopups(m);
       this.drawRadar(m);
+    }
+
+    // Dashed line from the passer to where the pass will go while a pass button is held.
+    drawPreview(m) {
+      const pv = m.preview, p = m.controlled;
+      if (!pv || !p || !m.charging) return;
+      const g = this.ctx;
+      const x0 = this.sx(p.x), y0 = this.sy(p.y), x1 = this.sx(pv.x), y1 = this.sy(pv.y);
+      const len = Math.hypot(x1 - x0, y1 - y0);
+      const n = Math.max(1, Math.floor(len));
+      const col = pv.lofted ? '#9fd3ff' : '#ffffff';
+      for (let i = 4; i <= n; i++) {
+        if (Math.floor(i / 3) % 2) continue;           // 3px dash, 3px gap
+        const t = i / n;
+        // lofted passes arc upwards in the preview
+        const lift = pv.lofted ? Math.sin(Math.PI * t) * Math.min(24, len * 0.18) : 0;
+        g.fillStyle = 'rgba(0,0,0,0.45)';
+        g.fillRect(Math.round(x0 + (x1 - x0) * t), Math.round(y0 + (y1 - y0) * t - lift) + 1, 1, 1);
+        g.fillStyle = col;
+        g.fillRect(Math.round(x0 + (x1 - x0) * t), Math.round(y0 + (y1 - y0) * t - lift), 1, 1);
+      }
+      // landing marker: an X in space, a ring under a teammate
+      g.fillStyle = col;
+      if (pv.target) {
+        const tx = this.sx(pv.target.x), ty = this.sy(pv.target.y);
+        g.fillRect(tx - 4, ty + 1, 9, 1); g.fillRect(tx - 3, ty + 2, 7, 1); g.fillRect(tx - 4, ty, 1, 1); g.fillRect(tx + 4, ty, 1, 1);
+      }
+      for (let k = -2; k <= 2; k++) { g.fillRect(x1 + k, y1 + k, 1, 1); g.fillRect(x1 + k, y1 - k, 1, 1); }
     }
 
     drawPopups(m) {

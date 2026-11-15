@@ -10,6 +10,7 @@
     shoot: ['Space', 'KeyL', 'KeyC'],
     start: ['Enter', 'NumpadEnter'],
     pause: ['KeyP', 'Escape'],
+    restart: ['KeyR'],
   };
   const GAME_KEYS = new Set(Object.values(BIND).flat());
 
@@ -17,6 +18,7 @@
     keys: {}, pr: {}, rel: {},
     init() {
       addEventListener('keydown', (e) => {
+        if (e.metaKey || e.ctrlKey) return; // leave browser shortcuts (Cmd+R etc.) alone
         if (GAME_KEYS.has(e.code)) e.preventDefault();
         if (e.repeat) return;
         this.keys[e.code] = true;
