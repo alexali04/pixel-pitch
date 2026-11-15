@@ -21,6 +21,7 @@
     ['.KK.KK.', '.BB.BB.'],
     ['..KKK..', '..BBB..'],
   ];
+  const LUNGE = ['.KK.KKK', '.BB...B'];  // leg stuck out for a standing tackle
 
   class Renderer {
     constructor(canvas) {
@@ -158,7 +159,22 @@
 
       this.drawGoalFront(0); this.drawGoalFront(C.W);
       this.drawMarkers(m);
+      this.drawPopups(m);
       this.drawRadar(m);
+    }
+
+    drawPopups(m) {
+      const g = this.ctx;
+      g.font = '8px "Press Start 2P", monospace';
+      g.textAlign = 'center';
+      g.textBaseline = 'alphabetic';
+      for (const pp of m.popups) {
+        const x = this.sx(pp.x), y = this.sy(pp.y) - 22;
+        g.globalAlpha = Math.min(1, pp.t * 3);
+        g.fillStyle = '#000'; g.fillText(pp.text, x + 1, y + 1);
+        g.fillStyle = pp.color; g.fillText(pp.text, x, y);
+      }
+      g.globalAlpha = 1;
     }
 
     drawGoalBack(side) {
@@ -197,8 +213,9 @@
       const left = p.fx < -0.1 || (Math.abs(p.fx) <= 0.1 && p.team.dir < 0);
       const moving = Math.hypot(p.vx, p.vy) > 0.5;
       const frame = moving ? Math.floor(p.anim) % 4 : 0;
-      const rows = BODY.concat(LEGS[frame]);
-      const ox = x - 3, oy = y - rows.length;
+      const rows = BODY.concat(p.lunge > 0 ? LUNGE : LEGS[frame]);
+      const lean = p.lunge > 0 ? (left ? -1 : 1) : 0;
+      const ox = x - 3 + lean, oy = y - rows.length;
       for (let r = 0; r < rows.length; r++) {
         const row = rows[r];
         for (let c = 0; c < 7; c++) {
@@ -210,6 +227,15 @@
       }
       // keeper gloves
       if (p.isGK) { g.fillStyle = '#f4f4f4'; g.fillRect(ox, oy + 6, 1, 1); g.fillRect(ox + 6, oy + 6, 1, 1); }
+      // holding off a defender: arm out towards them
+      if (p.shielding) {
+        const sx = this.sx(p.shielding.x) < x ? ox - 2 : ox + 7;
+        g.fillStyle = pal.T; g.fillRect(sx + (sx < x ? 1 : 0), oy + 5, 1, 1);
+        g.fillStyle = pal.S; g.fillRect(sx + (sx < x ? 0 : 1), oy + 5, 1, 1);
+      }
+      if (p.lunge > 0 && p.team.isUser === false) {
+        g.fillStyle = '#e4572e'; g.fillRect(x, oy - 6, 1, 3); g.fillRect(x, oy - 2, 1, 1);
+      }
     }
 
     drawLying(p, x, y, pal) {
@@ -249,8 +275,9 @@
       g.fillRect(x - 4, y + 1, 9, 1);
       if (m.charging) {
         g.fillStyle = '#000'; g.fillRect(x - 8, y - 24, 17, 4);
-        const w = Math.round(15 * m.charge);
-        g.fillStyle = m.charge > 0.8 ? '#e4572e' : m.charge > 0.5 ? '#f3a712' : '#a8c686';
+        const w = Math.max(1, Math.round(15 * m.charge));
+        const ramp = m.chargeKind === 'shot' ? ['#a8c686', '#f3a712', '#e4572e'] : ['#9fd3c7', '#5fa8d3', '#3a6ea5'];
+        g.fillStyle = ramp[m.charge > 0.8 ? 2 : m.charge > 0.45 ? 1 : 0];
         g.fillRect(x - 7, y - 23, w, 2);
       }
     }

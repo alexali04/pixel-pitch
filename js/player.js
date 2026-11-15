@@ -24,6 +24,9 @@
       this.stun = 0;      // on the floor / recovering
       this.slide = 0;     // slide-tackle time left
       this.dive = 0;      // keeper dive time left
+      this.lunge = 0;     // standing-tackle wind-up time left
+      this.lungeTarget = null;
+      this.shielding = null; // opponent the carrier is holding off
       this.frozen = false;
       this.receiving = null;
       this.userAuto = false;
@@ -85,6 +88,10 @@
         return;
       }
       if (this.frozen) { this.vx = 0; this.vy = 0; return; }
+      if (this.lunge > 0 && this.lungeTarget) {
+        const n = U.norm(this.lungeTarget.x - this.x, this.lungeTarget.y - this.y);
+        this.dvx = n.x * 6.5; this.dvy = n.y * 6.5;
+      }
 
       const acc = 10 + this.stats.acceleration * 0.08;
       let ax = this.dvx - this.vx, ay = this.dvy - this.vy;

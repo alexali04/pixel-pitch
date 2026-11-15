@@ -2,11 +2,11 @@
 window.PP = window.PP || {};
 
 PP.C = {
-  W: 105, H: 68,                 // pitch length (x) and width (y)
+  W: 105, H: 50,                 // pitch length (x) and width (y); narrower than real for more direct play
   GOAL_W: 7.32, GOAL_H: 2.44, GOAL_D: 2.0,
-  BOX_D: 16.5, BOX_W: 40.32,
-  SIX_D: 5.5, SIX_W: 18.32,
-  CIRCLE_R: 9.15, SPOT: 11,
+  BOX_D: 16.5, BOX_W: 32,
+  SIX_D: 5.5, SIX_W: 15,
+  CIRCLE_R: 8, SPOT: 11,
 
   PPM: 8,                        // render pixels per metre
   VIEW_W: 512, VIEW_H: 288,      // internal low-res canvas

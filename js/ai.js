@@ -90,6 +90,7 @@
     const lineD = AI.offsideLine(m, team);
     for (const p of team.players) {
       if (p.isGK) { AI.keeper(m, p, dt); continue; }
+      if (p.lunge > 0) continue;
       if (p.receiving && m.time - p.receiving.t > 4) p.receiving = null;
       if (p === owner) { if (p !== userCtl) AI.carrier(m, p, dt); continue; }
       if (p === userCtl && !p.userAuto) continue;
@@ -119,7 +120,7 @@
       return AI.cornerTarget(m, team, p);
     } else if (phase === 'attack') {
       d = 0.1 + s.d * 0.78 + ballD * 0.32;
-      l = 0.5 + (s.l - 0.5) * 1.2 + (bl - 0.5) * 0.2;
+      l = 0.5 + (s.l - 0.5) * 1.1 + (bl - 0.5) * 0.2;
       if (ATTACKERS.has(s.role) && m.state === 'play') {
         if (m.time > p.runUntil + 1.5 && Math.random() < C.DT * 0.35) p.runUntil = m.time + U.rand(1.2, 2.2);
         if (m.time < p.runUntil) { d = Math.max(d, lineD + 0.05); sprint = true; }
@@ -166,10 +167,9 @@
     const ty = owner.y + n.y * 1.1 + owner.vy * 0.25;
     p.steer(tx, ty, true, 1);
     const d = U.dist(p.x, p.y, owner.x, owner.y);
-    if (d < 1.5 && p.tackleCd <= 0 && m.time > m.ball.protectUntil) {
-      p.face(owner.x, owner.y);
-      p.tackleCd = U.rand(0.6, 1.2);
-      if (Math.random() < 0.55) m.resolveTackle(p, owner, false);
+    if (d < 1.6 && p.tackleCd <= 0 && m.time > m.ball.protectUntil) {
+      p.tackleCd = U.rand(1.0, 1.8);
+      if (Math.random() < 0.6) m.startLunge(p, owner, 0.24);
     }
   };
 
@@ -235,11 +235,12 @@
       }
       const back = lk && lk.by === q && m.time - lk.t < 3 ? 0.4 : 0;
       const free = Math.min(open, 8) / 8;
-      let s = gain * 4 + U.clamp(lane / 2.5, -1, 1) * 0.8 + free * 0.5 - d / 50 - 0.4 - back + U.rand(-0.1, 0.1);
+      const square = gain < 0.02 ? 0.25 : 0;
+      let s = gain * 5 + U.clamp(lane / 2.5, -1, 1) * 0.8 + free * 0.5 - d / 50 - 0.4 - back - square + U.rand(-0.1, 0.1);
       if (lane < 0) s -= 2;
       out.push({ kind: 'pass', target: q, lofted: false, score: s, lane });
       if (d > 14) {
-        let sl = gain * 4 + U.clamp(landM / 3, -1, 1) * 0.9 - 0.6 - d / 70 - back + U.rand(-0.1, 0.1);
+        let sl = gain * 5 + U.clamp(landM / 3, -1, 1) * 0.9 - 0.6 - d / 70 - back + U.rand(-0.1, 0.1);
         if (landM < 0) sl -= 2;
         out.push({ kind: 'pass', target: q, lofted: true, score: sl, lane: landM });
       }

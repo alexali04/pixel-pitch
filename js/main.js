@@ -24,7 +24,8 @@
   const CONTROLS = `
     <div class="controls">
       <span class="h">Move</span><span><kbd>WASD</kbd> / <kbd>Arrows</kbd></span><span><kbd>Shift</kbd> sprint</span>
-      <span class="h">Attack</span><span><kbd>J</kbd> pass &nbsp;<kbd>K</kbd> lofted</span><span><kbd>Space</kbd> hold to shoot</span>
+      <span class="h">Attack</span><span><kbd>J</kbd> pass &nbsp;<kbd>K</kbd> lofted</span><span><kbd>Space</kbd> shoot</span>
+      <span class="h">Strength</span><span>hold the button</span><span>tap = soft, hold = bullet</span>
       <span class="h">Defend</span><span><kbd>J</kbd> switch &nbsp;<kbd>K</kbd> slide</span><span><kbd>Space</kbd> tackle</span>
       <span class="h">Game</span><span><kbd>P</kbd> pause</span><span>aim with direction keys</span>
     </div>`;

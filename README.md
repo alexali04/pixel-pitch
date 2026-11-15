@@ -20,8 +20,10 @@ then visit http://localhost:8765.
 | Shift | sprint | sprint |
 | J | ground pass | switch player |
 | K | lofted pass | slide tackle |
-| Space | hold to charge, release to shoot | standing tackle |
+| Space | shoot | standing tackle |
 | P / Esc | pause | pause |
+
+Hold J / K / Space to set strength: tap = soft, hold = bullet (a bar shows above your player).
 
 You attack right to left. Control switches automatically to whoever has the ball,
 and to the nearest defender when the CPU wins it.
