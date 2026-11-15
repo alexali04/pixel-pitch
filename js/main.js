@@ -30,7 +30,7 @@
   const CONTROLS = `
     <div class="controls">
       <span class="h">Move</span><span><kbd>WASD</kbd> / <kbd>Arrows</kbd></span><span><kbd>Shift</kbd> sprint</span>
-      <span class="h">Attack</span><span><kbd>Space</kbd> pass or shoot &nbsp;<kbd>L</kbd> shoot</span><span><kbd>J</kbd> pass &nbsp;<kbd>K</kbd> lofted / chip</span>
+      <span class="h">Attack</span><span><kbd>J</kbd> pass &nbsp;<kbd>K</kbd> lofted / chip</span><span><kbd>L</kbd> / <kbd>Space</kbd> shoot</span>
       <span class="h">Strength</span><span>hold the button</span><span>tap = soft, hold = bullet</span>
       <span class="h">Defend</span><span><kbd>Space</kbd> tackle &nbsp;<kbd>K</kbd> slide</span><span><kbd>J</kbd> switch</span>
       <span class="h">Game</span><span><kbd>P</kbd> pause &nbsp;<kbd>R</kbd> restart &nbsp;<kbd>M</kbd> mute</span><span>aim with direction keys</span>

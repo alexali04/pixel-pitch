@@ -18,10 +18,9 @@ then visit http://localhost:8765.
 |---|---|---|
 | WASD / Arrows | move (aims passes and shots) | move |
 | Shift | sprint | sprint |
-| J | ground pass | switch player |
+| J | ground pass (to the team-mate you're pointing at) | switch player |
 | K | lofted pass; aimed at goal from within ~26m (not from wide) it's a chip shot | slide tackle |
-| L | always shoot | |
-| Space | pass or shoot: a shot if you're aiming at the goal mouth from within ~32m (a target appears on the goal), otherwise a pass. From wide, it only shoots when aimed right at the goal; a team-mate in the box on your line means a cross | tackle (or go for a loose ball) |
+| L / Space | shoot | tackle (or go for a loose ball) |
 | J / Space with the ball in the air near you | header pass / header at goal | header clearance (Space) |
 | Space with the ball loose on the floor | sprint to collect it | sprint to intercept it |
 | P / Esc | pause | pause |
@@ -46,6 +45,10 @@ teammate who will get there first; they run onto it. Keepers can't handle back-p
 Keepers holding the ball: **J** rolls it out, **K** / **Space** kicks it.
 
 ## Smoothness controls
+
+**Aim with**: *Team-mate targeting* (default) — the direction you hold picks a team-mate and the
+pass leads his run, so no fine angle steering is needed; *Free aim* — the keys turn the aim;
+*Mouse* — the mouse aims. Only real goals count: there are no offscreen goals.
 
 On the title screen or pause menu: **Pass assist** (off / light / strong), **Aim with** (direction
 keys / mouse), **Key aim speed**, **Auto-tackle**, **Auto-sprint on defence**. With mouse aim the

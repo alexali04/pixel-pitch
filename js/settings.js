@@ -2,7 +2,7 @@
 (function () {
   const DEFAULTS = {
     passAssist: 'light',   // off | light | strong : lean onto runs / towards goal, keep it in play
-    aim: 'keys',           // keys | mouse : what aims passes and shots
+    aim: 'keys',           // keys | target | mouse : free key aim / pick a team-mate / mouse
     aimSpeed: 'normal',    // slow | normal | fast : how quickly the keyboard aim turns
     autoTackle: true,      // defenders take the ball off attackers who run into them
     autoSprint: true,      // sprint automatically when defending near your goal
@@ -16,7 +16,7 @@
   // Option lists for the menu (value, label).
   PP.SETTING_OPTIONS = {
     passAssist: [['off', 'Off'], ['light', 'Light'], ['strong', 'Strong']],
-    aim: [['keys', 'Direction keys'], ['mouse', 'Mouse']],
+    aim: [['keys', 'Free aim (keys)'], ['target', 'Team-mate targeting'], ['mouse', 'Mouse']],
     aimSpeed: [['slow', 'Slow'], ['normal', 'Normal'], ['fast', 'Fast']],
     autoTackle: [[true, 'On'], [false, 'Off']],
     autoSprint: [[true, 'On'], [false, 'Off']],

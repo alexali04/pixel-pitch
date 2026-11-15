@@ -216,11 +216,35 @@
       const back = U.clamp(ballD - 0.27, 0.07, 0.55);
       d = back + (s.d - 0.17) * 0.92;
       l = 0.5 + (s.l - 0.5) * 1.1 + (bl - 0.5) * 0.22;
+      const o0 = b.owner;
+      const carrierLooking = o0 && o0.team === team && o0.fx * team.dir > 0.4 && m.pressureOn(o0) < 0.5;
       if (ATTACKERS.has(s.role) && m.state === 'play') {
-        if (m.time > p.runUntil + 1.5 && Math.random() < C.DT * 0.35) p.runUntil = m.time + U.rand(1.2, 2.2);
+        // Runs in behind: much likelier when the carrier is facing forward with time on the ball.
+        const rate = carrierLooking ? 1.1 : 0.3;
+        if (m.time > p.runUntil + 1.2 && Math.random() < C.DT * rate) p.runUntil = m.time + U.rand(1.2, 2.0);
         if (m.time < p.runUntil) { d = Math.max(d, lineD + 0.05); sprint = true; }
       }
       if (!sprint) d = Math.min(d, lineD - 0.01);
+      if (!sprint && o0 && o0.team === team && o0 !== p && m.state === 'play' && s.role !== 'CB') {
+        // Get open: nudge towards the nearby spot furthest from defenders with a clear lane.
+        if (!p.openUntil || m.time > p.openUntil) {
+          const base = team.toWorld(d, l);
+          let bestS = -1e9, best = null;
+          for (const [dx, dy] of [[0, 0], [0, 4], [0, -4], [3, 3], [3, -3], [-3, 3], [-3, -3], [4, 0]]) {
+            const cx = base.x + dx * team.dir, cy = U.clamp(base.y + dy, 2, C.H - 2);
+            let open = 8, lane = 8;
+            for (const q of m.other(team).players) {
+              open = Math.min(open, U.dist(q.x, q.y, cx, cy));
+              const sp = U.segPoint(q.x, q.y, o0.x, o0.y, cx, cy);
+              if (sp.t > 0.1 && sp.t < 0.95) lane = Math.min(lane, sp.d);
+            }
+            const sc = open + lane * 0.6 - Math.hypot(dx, dy) * 0.15;
+            if (sc > bestS) { bestS = sc; best = { dx, dy }; }
+          }
+          p.openOff = best; p.openUntil = m.time + 0.5;
+        }
+        if (p.openOff) { d += (p.openOff.dx / C.W); l += p.openOff.dy / C.H; }
+      }
     } else {
       const B = AI.BLOCKS[team.block || 'mid'], comp = team.compact ?? 0.5;
       let line = B.line + (ballD - 0.5) * 0.18;                // breathe with the ball
@@ -300,8 +324,10 @@
   AI.press = function (m, p, owner, hurry, dist = 1.1) {
     const team = p.team;
     let dir = U.norm(team.ownX - owner.x, C.H / 2 - owner.y);
+    const danger = team.depth(owner.x) < 0.35; // near our goal: get tight, fast, straight at him
+    if (danger) { hurry = true; dist = Math.min(dist, 0.7); }
     const opt = AI.bestOutlet(m, owner);
-    if (opt) {
+    if (opt && !danger) {
       const to = U.norm(opt.x - owner.x, opt.y - owner.y);
       dir = U.norm(dir.x * 0.6 + to.x * 0.4, dir.y * 0.6 + to.y * 0.4);
     }
@@ -333,7 +359,10 @@
       return;
     }
     p.think -= dt;
-    if (p.think <= 0 || !p.plan) {
+    // Until he's had time to get the ball under control and look up, he just shields it and
+    // drifts forward; no instant passes off a tackle or first touch.
+    if (!p.plan && p.think > 0) p.plan = { kind: 'dribble', x: p.x + p.team.dir * 3, y: p.y, sprint: false, settle: true };
+    if (p.think <= 0) {
       p.think = p.team.isUser ? U.rand(0.22, 0.4) : U.rand(0.35, 0.6);
       const plan = AI.decide(m, p);
       if (plan.kind === 'shoot') { m.shoot(p, plan.aim, plan.power); p.plan = null; return; }
