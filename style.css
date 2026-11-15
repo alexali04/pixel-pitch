@@ -146,3 +146,6 @@ kbd {
 .ratings td { color: var(--accent); }
 .btn.toggle { margin-top: 0; font-size: calc(var(--s) * 6px); background: #9fd3c7; box-shadow: calc(var(--s) * 2px) calc(var(--s) * 2px) 0 #3e6e66; }
 .hint { font-size: calc(var(--s) * 5px); }
+#playerTag .trait { color: var(--accent); }
+#playerTag .stam { margin-top: calc(var(--s) * 2px); height: calc(var(--s) * 3px); background: #3a3f44; border: calc(var(--s) * 0.5px) solid #000; }
+#playerTag .stam i { display: block; height: 100%; }

@@ -18,21 +18,26 @@ then visit http://localhost:8765.
 |---|---|---|
 | WASD / Arrows | move (aims passes and shots) | move |
 | Shift | sprint | sprint |
-| J | ground pass | switch player |
+| J | ground pass | tackle (or go for a loose ball) |
 | K | lofted pass | slide tackle |
-| Space | shoot | standing tackle |
+| Space | pass or shoot: a shot if you're aiming at the goal mouth from within ~32m (a target appears on the goal), otherwise a pass | switch player |
 | J / Space with the ball in the air near you | header pass / header at goal | header clearance (Space) |
-| Space with the ball loose on the floor | sprint to collect it | sprint to intercept it |
+| J with the ball loose on the floor | sprint to collect it | sprint to intercept it |
 | P / Esc | pause | pause |
 | R | restart the match | restart the match |
 | M | mute / unmute sound | mute / unmute sound |
+
+Receiving takes a moment: a hard or dropping ball must be brought under control before you can
+play it (better first touch = quicker); a pass released early goes as soon as it's controlled.
 
 Hold J / K / Space to set strength, like how far you swing your leg: a tap on J is a firm
 ~15m pass and a full hold is a ~40m ball (capped, so it won't fly out of play); keepers
 play it firmer, and back-passes to the keeper always reach him; a tap on K is a short
 chip that still arcs over a defender and a full hold is a ~45m ball; a full wind-up on a shot is hard but can fly wide or over. L and C also shoot.
 
-**Aiming passes:** the pass goes exactly where the aim points. The aim starts at your direction
+**Aiming passes:** the pass goes where the aim points, with a light assist: it leans onto a
+team-mate's run when one is within ~14° of the line, leans a touch towards goal in the final
+third, and turns back into play (or towards the box) rather than going straight out. The aim starts at your direction
 when you press J/K and then turns smoothly (~150°/s) towards whatever direction you hold, so
 you can stop it at any angle. A dashed line shows where the ball will go, and a ring marks the
 teammate who will get there first; they run onto it. Keepers can't handle back-passes.

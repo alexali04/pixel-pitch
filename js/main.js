@@ -30,9 +30,9 @@
   const CONTROLS = `
     <div class="controls">
       <span class="h">Move</span><span><kbd>WASD</kbd> / <kbd>Arrows</kbd></span><span><kbd>Shift</kbd> sprint</span>
-      <span class="h">Attack</span><span><kbd>J</kbd> pass &nbsp;<kbd>K</kbd> lofted</span><span><kbd>Space</kbd> shoot</span>
+      <span class="h">Attack</span><span><kbd>Space</kbd> pass or shoot</span><span><kbd>J</kbd> pass &nbsp;<kbd>K</kbd> lofted</span>
       <span class="h">Strength</span><span>hold the button</span><span>tap = soft, hold = bullet</span>
-      <span class="h">Defend</span><span><kbd>J</kbd> switch &nbsp;<kbd>K</kbd> slide</span><span><kbd>Space</kbd> tackle</span>
+      <span class="h">Defend</span><span><kbd>J</kbd> tackle &nbsp;<kbd>K</kbd> slide</span><span><kbd>Space</kbd> switch</span>
       <span class="h">Game</span><span><kbd>P</kbd> pause &nbsp;<kbd>R</kbd> restart &nbsp;<kbd>M</kbd> mute</span><span>aim with direction keys</span>
     </div>`;
 
@@ -120,7 +120,7 @@
     if (!match) return;
     const min = Math.min(90, Math.floor(match.clock / 60));
     const c = match.controlled;
-    const key = `${match.score}|${min}|${match.banner ? match.banner.text : ''}|${c ? c.name : ''}`;
+    const key = `${match.score}|${min}|${match.banner ? match.banner.text : ''}|${c ? c.name : ''}|${c ? Math.round(c.energy * 20) : ''}`;
     if (key === lastHud) return;
     lastHud = key;
     $('score').textContent = `${match.score[0]} - ${match.score[1]}`;
@@ -128,7 +128,8 @@
     const bn = $('banner');
     if (match.banner) { bn.textContent = match.banner.text; bn.classList.add('show'); }
     else bn.classList.remove('show');
-    $('playerTag').textContent = c ? `#${c.num} ${c.name} · ${c.role}` : '';
+    $('playerTag').innerHTML = c ? `#${c.num} ${c.name} · ${c.role} · ${c.foot}${c.trait ? ` · <span class="trait">${c.trait}</span>` : ''}
+      <div class="stam"><i style="width:${Math.round(c.energy * 100)}%;background:${c.energy > 0.5 ? '#5bd15b' : c.energy > 0.25 ? '#f3a712' : '#e4572e'}"></i></div>` : '';
   }
 
   let last = performance.now(), acc = 0;

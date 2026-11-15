@@ -166,7 +166,7 @@
       let tx = this.cam.x;
       if (fx < tx - dz) tx = fx + dz; else if (fx > tx + dz) tx = fx - dz;
       const ty = C.H / 2 + 2.5 + (b.ry - C.H / 2) * 0.1;
-      const k = m.camSnap ? 1 : Math.min(1, dt * 3);
+      const k = m.camSnap ? 1 : Math.min(1, dt * 4.5);
       m.camSnap = false;
       this.cam.x += (tx - this.cam.x) * k;
       this.cam.y += (ty - this.cam.y) * k;
@@ -198,8 +198,11 @@
         g.fillRect(x - 3, y - 1, 8, 3); g.fillRect(x - 4, y, 10, 1);
       }
       const b = m.ball;
-      const bs = Math.max(2, 4 - Math.floor(b.rz));
-      g.fillRect(this.sx(b.rx, b.ry) - 1, this.sy(b.ry), bs, 1);
+      // Ball shadow: a dark blob on the turf, clear even when the ball is high.
+      g.fillStyle = 'rgba(0,0,0,0.5)';
+      const bsx = this.sx(b.rx, b.ry), bsy = this.sy(b.ry), big = b.rz < 3;
+      g.fillRect(bsx - 1, bsy, big ? 4 : 3, 2); g.fillRect(bsx - 2, bsy, 1, 1); g.fillRect(bsx + (big ? 3 : 2), bsy, 1, 1);
+      g.fillStyle = 'rgba(0,0,0,0.28)';
 
       // Depth-sorted sprites.
       const list = m.players.map((p) => ({ y: p.ry, p }));
@@ -222,18 +225,30 @@
       const pv = m.preview, p = m.controlled;
       if (!pv || !p || !m.charging) return;
       const g = this.ctx;
-      const x0 = this.sx(p.rx, p.ry), y0 = this.sy(p.ry), x1 = this.sx(pv.x, pv.y), y1 = this.sy(pv.y);
-      const len = Math.hypot(x1 - x0, y1 - y0);
-      const n = Math.max(1, Math.floor(len));
+      if (pv.shot) {
+        // Shot: a target on the goal mouth where you're aiming.
+        const gx = this.sx(pv.x, pv.y), gy = this.sy(pv.y, 1.0), pulse = Math.floor(this.t * 6) % 2;
+        g.fillStyle = '#000'; g.fillRect(gx - 4, gy, 9, 1); g.fillRect(gx, gy - 4, 1, 9);
+        g.fillStyle = pulse ? '#ff6b4a' : '#ffd23f';
+        g.fillRect(gx - 3, gy, 2, 1); g.fillRect(gx + 2, gy, 2, 1); g.fillRect(gx, gy - 3, 1, 2); g.fillRect(gx, gy + 2, 1, 2);
+        return;
+      }
+      const x1 = this.sx(pv.x, pv.y), y1 = this.sy(pv.y);
       const col = pv.lofted ? '#9fd3ff' : '#ffffff';
-      for (let i = 4; i <= n; i++) {
-        if (Math.floor(i / 3) % 2) continue; // 3px dash, 3px gap
-        const t = i / n;
-        const lift = pv.lofted ? Math.sin(Math.PI * t) * Math.min(28, len * 0.22) : 0;
-        g.fillStyle = 'rgba(0,0,0,0.45)';
-        g.fillRect(Math.round(x0 + (x1 - x0) * t), Math.round(y0 + (y1 - y0) * t - lift) + 1, 1, 1);
-        g.fillStyle = col;
-        g.fillRect(Math.round(x0 + (x1 - x0) * t), Math.round(y0 + (y1 - y0) * t - lift), 1, 1);
+      // Dashed line along the predicted flight: it bends with the curl and rises with a chip.
+      const b = m.ball;
+      const pts = [[this.sx(b.rx, b.ry), this.sy(b.ry, b.rz)]].concat((pv.path || []).map((q) => [this.sx(q.x, q.y), this.sy(q.y, q.z)]));
+      let walked = 0;
+      for (let i = 1; i < pts.length; i++) {
+        const [ax, ay] = pts[i - 1], [bx, by] = pts[i];
+        const seg = Math.hypot(bx - ax, by - ay), n = Math.max(1, Math.ceil(seg));
+        for (let j = 0; j < n; j++) {
+          walked++;
+          if (walked < 5 || Math.floor(walked / 3) % 2) continue; // 3px dash, 3px gap
+          const t = j / n, x = Math.round(ax + (bx - ax) * t), y = Math.round(ay + (by - ay) * t);
+          g.fillStyle = 'rgba(0,0,0,0.45)'; g.fillRect(x, y + 1, 1, 1);
+          g.fillStyle = col; g.fillRect(x, y, 1, 1);
+        }
       }
       g.fillStyle = col;
       if (pv.target) this.ring(this.sx(pv.target.rx, pv.target.ry), this.sy(pv.target.ry), pv.offside ? '#e4572e' : col);
@@ -410,7 +425,8 @@
       if (m.charging) {
         g.fillStyle = '#000'; g.fillRect(x - 8, y - 30, 17, 4);
         const w = Math.max(1, Math.round(15 * m.charge));
-        const ramp = m.chargeKind === 'shot' ? ['#a8c686', '#f3a712', '#e4572e'] : ['#9fd3c7', '#5fa8d3', '#3a6ea5'];
+        const isShot = m.chargeKind === 'shot' || (m.preview && m.preview.shot);
+        const ramp = isShot ? ['#a8c686', '#f3a712', '#e4572e'] : ['#9fd3c7', '#5fa8d3', '#3a6ea5'];
         g.fillStyle = ramp[m.charge > 0.8 ? 2 : m.charge > 0.45 ? 1 : 0];
         g.fillRect(x - 7, y - 29, w, 2);
       }

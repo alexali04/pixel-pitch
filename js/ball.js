@@ -8,6 +8,7 @@
       this.x = x; this.y = y; this.z = 0;
       this.vx = 0; this.vy = 0; this.vz = 0;
       this.px = x; this.py = y; this.pz = 0;
+      this.curve = 0;
       this.owner = null;
       this.lastTouch = null;
       this.lastKick = null;
@@ -23,7 +24,7 @@
 
     // Future positions of the loose ball, n samples spaced dt apart.
     predict(n, dt) {
-      const b = { x: this.x, y: this.y, z: this.z, vx: this.vx, vy: this.vy, vz: this.vz };
+      const b = { x: this.x, y: this.y, z: this.z, vx: this.vx, vy: this.vy, vz: this.vz, curve: this.curve || 0 };
       const out = [];
       for (let i = 0; i < n; i++) {
         Ball.integrate(b, dt);
@@ -33,6 +34,15 @@
     }
 
     static integrate(b, dt) {
+      // Spin: sideways acceleration (to the left of travel for positive curve), weaker on the ground.
+      if (b.curve) {
+        const s = Math.hypot(b.vx, b.vy);
+        if (s > 0.5) {
+          const a = b.curve * (b.z > 0.05 ? 1 : 0.5) * dt, vx = b.vx, vy = b.vy;
+          b.vx += (vy / s) * a; b.vy -= (vx / s) * a;
+        }
+        b.curve *= Math.exp(-0.5 * dt);
+      }
       if (b.z > 0.001 || b.vz > 0.001) {
         b.vz -= C.G * dt;
         const f = Math.exp(-C.AIR_K * dt);
@@ -40,7 +50,10 @@
         b.x += b.vx * dt; b.y += b.vy * dt; b.z += b.vz * dt;
         if (b.z <= 0) {
           b.z = 0;
-          if (b.vz < -1.5) { b.vz = -b.vz * 0.4; b.vx *= 0.62; b.vy *= 0.62; }
+          if (b.vz < -1.5) {
+            const keep = b.vz > -3.5 ? 0.9 : 0.62; // a low skim skids on, a dropping ball checks up
+            b.vz = -b.vz * 0.4; b.vx *= keep; b.vy *= keep;
+          }
           else b.vz = 0;
         }
       } else {

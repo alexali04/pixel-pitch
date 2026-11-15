@@ -12,6 +12,9 @@
       this.num = info.num;
       this.stats = info.stats;
       this.look = info.look;
+      this.foot = info.foot || 'R';
+      this.trait = info.trait || null;
+      this.energy = 1;                     // stamina left this match (sprinting drains it)
 
       this.x = 0; this.y = 0; this.vx = 0; this.vy = 0;
       this.fx = team.dir; this.fy = 0;      // facing unit vector
@@ -39,9 +42,12 @@
     get hasBall() { return this.team.match.ball.owner === this; }
 
     topSpeed(sprint) {
-      let v = 4.3 + this.stats.pace * 0.016;   // pace 75 -> 5.5 m/s jog
-      if (sprint) v *= 1.3;                     //          -> 7.2 m/s sprint
+      // Pace spreads players out: pace 65 ~5.2 m/s jog / 6.8 sprint, pace 88 ~6.1 / 7.9.
+      let v = 2.3 + this.stats.pace * 0.036;   // pace 75 ~5.0 m/s jog / 6.5 sprint
+      if (sprint) v *= 1.3;
+      v *= 0.86 + 0.14 * this.energy;           // tired legs
       if (this.hasBall) v *= sprint ? 0.86 : 0.92;
+      if (this.isGK && this.hasBall) v *= 0.75;
       return v;
     }
 
@@ -96,7 +102,7 @@
       if (this.lunge > 0 && this.lungeTarget) {
         // Tackle lunge: snap straight at the ball carrier's feet.
         const t = this.lungeTarget;
-        const n = U.norm(t.x + t.vx * 0.1 - this.x, t.y + t.vy * 0.1 - this.y);
+        const n = U.norm(t.x + t.vx * this.lunge - this.x, t.y + t.vy * this.lunge - this.y); // lead the carrier
         const sp = this.lungeSpeed || 6.5;
         this.vx = n.x * sp; this.vy = n.y * sp; this.dvx = this.vx; this.dvy = this.vy;
         this.fx = n.x; this.fy = n.y;
@@ -106,7 +112,11 @@
         return;
       }
 
-      const acc = 10 + this.stats.acceleration * 0.08;
+      const acc = 7 + this.stats.acceleration * 0.12;
+      // Stamina: sprinting drains it, jogging/standing recovers it; fitter players last longer.
+      const spd = Math.hypot(this.vx, this.vy), jog = 2.3 + this.stats.pace * 0.036;
+      if (spd > jog * 1.05) this.energy = Math.max(0, this.energy - dt * 0.05 * (1.5 - this.stats.stamina / 100));
+      else this.energy = Math.min(1, this.energy + dt * 0.02 * (0.5 + this.stats.stamina / 100));
       let ax = this.dvx - this.vx, ay = this.dvy - this.vy;
       const l = Math.hypot(ax, ay), m = acc * dt;
       if (l > m) { ax *= m / l; ay *= m / l; }

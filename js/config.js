@@ -9,17 +9,17 @@ PP.C = {
   CIRCLE_R: 8, SPOT: 11,
 
   // Tilted camera: different pixel scales across (x), down (y) and for height (z).
-  PX: 9, PY: 5.2, PZ: 7.5,       // ~62m of pitch visible across, full width visible down
+  PX: 8.5, PY: 4.9, PZ: 7.1,     // ~66m of pitch visible across, full width visible down
   VIEW_W: 560, VIEW_H: 315,      // internal low-res canvas
   MARGIN: 12,                    // metres of stadium drawn around the pitch
 
   G: 9.8,
   ROLL_C: 1.6,                   // rolling resistance: dv/dt = -(ROLL_C + ROLL_K * v)
-  ROLL_K: 0.3,
-  AIR_K: 0.1,                    // exponential air drag per second
+  ROLL_K: 0.45,                  // fast balls bleed speed quickly, slow ones roll on
+  AIR_K: 0.22,                   // exponential air drag per second (long balls die)
 
   HALF_SECONDS: 180,             // real seconds per half
-  DT: 1 / 60,
+  DT: 1 / 120,                   // physics/input rate (matches 120 Hz displays; cheap)
 };
 PP.C.GOAL_Y1 = PP.C.H / 2 - PP.C.GOAL_W / 2;
 PP.C.GOAL_Y2 = PP.C.H / 2 + PP.C.GOAL_W / 2;

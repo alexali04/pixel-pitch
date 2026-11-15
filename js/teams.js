@@ -37,16 +37,16 @@
 
   const PROFILE = {
     GK: { reflexes: 12, diving: 10, handling: 8, gkPositioning: 10, kicking: 2, pace: -18, acceleration: -10, finishing: -40, dribbling: -30, tackling: -35, shotPower: -10 },
-    CB: { tackling: 10, marking: 10, positioning: 8, strength: 8, heading: 10, finishing: -25, dribbling: -12, pace: -4, agility: -6 },
+    CB: { tackling: 10, marking: 10, positioning: 8, strength: 10, heading: 10, finishing: -25, dribbling: -12, pace: -9, acceleration: -8, agility: -6 },
     LB: { pace: 6, stamina: 6, crossing: 4, tackling: 4, marking: 3, finishing: -18 },
     RB: { pace: 6, stamina: 6, crossing: 4, tackling: 4, marking: 3, finishing: -18 },
     DM: { tackling: 7, positioning: 6, shortPass: 6, stamina: 4, marking: 5, finishing: -12 },
     CM: { shortPass: 8, vision: 6, stamina: 6, longPass: 4, firstTouch: 3 },
     AM: { vision: 8, dribbling: 6, shortPass: 6, longShots: 5, firstTouch: 6, tackling: -12, marking: -10 },
-    LM: { pace: 7, acceleration: 7, dribbling: 6, crossing: 8, tackling: -8, marking: -8 },
-    RM: { pace: 7, acceleration: 7, dribbling: 6, crossing: 8, tackling: -8, marking: -8 },
-    LW: { pace: 9, acceleration: 9, dribbling: 9, agility: 6, crossing: 6, tackling: -14, marking: -14 },
-    RW: { pace: 9, acceleration: 9, dribbling: 9, agility: 6, crossing: 6, tackling: -14, marking: -14 },
+    LM: { pace: 10, acceleration: 10, dribbling: 6, crossing: 8, tackling: -8, marking: -8 },
+    RM: { pace: 10, acceleration: 10, dribbling: 6, crossing: 8, tackling: -8, marking: -8 },
+    LW: { pace: 14, acceleration: 13, dribbling: 9, agility: 8, crossing: 6, tackling: -14, marking: -14, strength: -8 },
+    RW: { pace: 14, acceleration: 13, dribbling: 9, agility: 8, crossing: 6, tackling: -14, marking: -14, strength: -8 },
     ST: { finishing: 12, shotPower: 7, heading: 5, composure: 7, strength: 4, tackling: -20, marking: -20, positioning: -10 },
   };
 
@@ -71,16 +71,35 @@
     return s;
   }
 
+  // A one-word characteristic from a player's standout attribute.
+  const TRAITS = [
+    ['pace', 85, 'Speedster'], ['dribbling', 85, 'Dribbler'], ['finishing', 85, 'Finisher'],
+    ['vision', 84, 'Playmaker'], ['shortPass', 86, 'Metronome'], ['tackling', 85, 'Destroyer'],
+    ['heading', 86, 'Aerial threat'], ['strength', 87, 'Powerhouse'], ['stamina', 87, 'Engine'],
+    ['reflexes', 86, 'Shot-stopper'], ['crossing', 85, 'Crosser'], ['longShots', 85, 'Long-range'],
+  ];
+  PP.traitFor = (role, s) => {
+    let best = null, margin = 0;
+    for (const [k, min, name] of TRAITS) {
+      if ((role === 'GK') !== (k === 'reflexes')) continue;
+      if (s[k] - min > margin - 0.001 && s[k] >= min) { margin = s[k] - min; best = name; }
+    }
+    return best;
+  };
+
   PP.makeSquad = function (formation, rating) {
     const used = new Set();
     return PP.FORMATIONS[formation].map((slot, i) => {
       let name;
       do { name = makeName(); } while (used.has(name));
       used.add(name);
+      const stats = makeStats(slot[0], rating + U.rand(-4, 4));
       return {
         name,
         num: i === 0 ? 1 : [2, 5, 4, 3, 6, 8, 10, 7, 9, 11][i - 1],
-        stats: makeStats(slot[0], rating + U.rand(-4, 4)),
+        stats,
+        foot: Math.random() < 0.25 ? 'L' : 'R',
+        trait: PP.traitFor(slot[0], stats),
         look: { skin: U.pick(SKIN), hair: U.pick(HAIR) },
       };
     });

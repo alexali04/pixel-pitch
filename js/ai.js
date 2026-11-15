@@ -123,6 +123,8 @@
         if (it.t < bestT) { bestT = it.t; chaser = p; }
       }
       if (userCtl && ctlT <= bestT + 0.3) chaser = null;
+      const lk = b.lastKick;
+      if (lk && lk.type === 'pass' && lk.team !== team && m.time - lk.t < 0.22) chaser = null; // read the pass first
     }
 
     // Defending roles: pressers go to the ball (count/zone set by the block, +1 on a trigger),
@@ -137,20 +139,25 @@
       const trig = AI.pressTrigger(m, owner);
       let n = cd < B.pressZone ? B.pressers : 0;
       if (trig && cd < B.pressZone + 0.2) n++;
+      const maxEngaged = 2; // never a pack of defenders on one man: one presses, one covers
+      n = Math.min(n, maxEngaged);
       const range = B.range + (trig ? 6 : 0);
       for (const c of cands.slice(0, n)) if (c.d < range || c === cands[0]) pressers.add(c.p);
       if (!pressers.size && cands.length) container = cands[0].p;
       const sp = Math.hypot(owner.vx, owner.vy);
       if (sp > 4 && owner.vx * (team.ownX - owner.x) > 0) {
         for (const c of cands) {
-          if (blockers.size >= 2 || c.d > 7) break;
+          if (pressers.size + blockers.size + (container ? 1 : 0) >= maxEngaged || c.d > 7) break;
           if (pressers.has(c.p) || c.p === container) continue;
           if (team.depth(c.p.x) < cd) blockers.add(c.p);
         }
       }
       if (team.isUser && cands.length) {
         const dCtl = userCtl ? U.dist(userCtl.x, userCtl.y, owner.x, owner.y) : 1e9;
-        if (dCtl < cands[0].d + 2 || cands[0].d > 10) { pressers.clear(); container = null; }
+        if (dCtl < cands[0].d + 2 || cands[0].d > 10) {
+          pressers.clear();
+          container = cands[0].d < 14 ? cands[0].p : null; // nearest team-mate covers behind you
+        }
       }
     }
 
@@ -269,8 +276,8 @@
     const tx = owner.x + dir.x * dist + owner.vx * 0.25;
     const ty = owner.y + dir.y * dist + owner.vy * 0.25;
     const d = U.dist(p.x, p.y, owner.x, owner.y);
-    p.steer(tx, ty, d > 9 || hurry, 1.5);
-    if (d < 1.6 && p.tackleCd <= 0 && m.time > m.ball.protectUntil) {
+    p.steer(tx, ty, d > 13 || hurry, 2.5); // close down at a jog unless far away
+    if (d < (team.isUser ? 2.4 : 1.6) && p.tackleCd <= 0 && m.time > m.ball.protectUntil) {
       p.tackleCd = U.rand(1.0, 1.8);
       if (Math.random() < 0.6) m.startLunge(p, owner, 0.24);
     }
@@ -295,7 +302,7 @@
     }
     p.think -= dt;
     if (p.think <= 0 || !p.plan) {
-      p.think = U.rand(0.22, 0.4);
+      p.think = p.team.isUser ? U.rand(0.22, 0.4) : U.rand(0.35, 0.6);
       const plan = AI.decide(m, p);
       if (plan.kind === 'shoot') { m.shoot(p, plan.aim, plan.power); p.plan = null; return; }
       if (plan.kind === 'pass') { m.passTo(p, plan.target, plan.lofted); p.plan = null; return; }
@@ -382,6 +389,7 @@
         if (U.segPoint(o.x, o.y, p.x, p.y, gx, gy).d < 1.2) blockers++;
       }
       let want = dG < 13 ? 0.85 : dG < 19 ? 0.4 : 0.1 * (p.stats.longShots / 70);
+      if (!team.isUser) want *= 0.8;
       if (blockers) want *= 0.4;
       if (Math.random() < want) {
         const side = opp.gk.y < gy ? 1 : -1;
