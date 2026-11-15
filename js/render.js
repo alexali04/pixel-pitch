@@ -28,11 +28,22 @@
     kick:   ['..SS.SSS..', '..KK...SKK', '..KK.....B', '..BB......'], // striking the ball
   };
   // Run cycle: stride, drive the knee (airborne, body up 1px), stride, kick the heel.
+  // Run cycle legs: near leg in kit colours (S/K), far leg shaded (q/k) so the stride reads.
+  Object.assign(LEGS, {
+    r0: ['.qq...SS..', '.kk....KK.', 'kk......KK', 'BB......BB'], // near leg reaching forward
+    r1: ['...SSqq...', '...KK.kkk.', '...KK.....', '...BB.....'], // planted; far knee drives through
+    r2: ['..qq.SS...', '.kk...KK..', 'BB.....KK.', '.......BB.'], // airborne
+    r3: ['.SS...qq..', '.KK....kk.', 'KK......kk', 'BB......BB'], // far leg reaching forward
+    r4: ['...qqSS...', '...kk.KKK.', '...kk.....', '...BB.....'], // planted; near knee drives through
+    r5: ['..SS.qq...', '.KK...kk..', 'BB.....kk.', '.......BB.'], // airborne
+  });
   const RUN = [
-    { torso: 'armA', shorts: 'wide', legs: 'stride', bob: 0 },
-    { torso: 'armA', shorts: 'knee', legs: 'kneeUp', bob: -1 },
-    { torso: 'armB', shorts: 'wide', legs: 'stride', bob: 0 },
-    { torso: 'armB', shorts: 'idle', legs: 'heelUp', bob: -1 },
+    { torso: 'armB', shorts: 'wide', legs: 'r0', bob: 0 },
+    { torso: 'armB', shorts: 'knee', legs: 'r1', bob: 1 },
+    { torso: 'idle', shorts: 'idle', legs: 'r2', bob: -1 },
+    { torso: 'armA', shorts: 'wide', legs: 'r3', bob: 0 },
+    { torso: 'armA', shorts: 'knee', legs: 'r4', bob: 1 },
+    { torso: 'idle', shorts: 'idle', legs: 'r5', bob: -1 },
   ];
   const sprite = (head, torso, shorts, legs) => head.concat(TORSO[torso], SHORTS[shorts], LEGS[legs]);
 
@@ -56,6 +67,13 @@
     rowToY(row) {
       const r = (row - VH / 2) / PY, q = 1 + 2 * PERSP * r;
       return q <= 0 ? null : this.cam.y + (-1 + Math.sqrt(q)) / PERSP;
+    }
+
+    // Screen pixel -> world point on the ground (for mouse aiming).
+    screenToWorld(px, py) {
+      const y = this.rowToY(py);
+      if (y == null) return null;
+      return { x: this.cam.x + (px - VW / 2) / (PX * this.k(y)), y };
     }
 
     // Draw the flat pitch texture row by row, each row scaled for its depth.
@@ -216,6 +234,11 @@
       this.drawGoalFront(0); this.drawGoalFront(C.W);
       this.drawPreview(m);
       this.drawMarkers(m);
+      if (PP.settings.aim === 'mouse' && PP.Input.mouse) { // crosshair where the mouse is aiming
+        const g2 = this.ctx, mx = Math.round(PP.Input.mouse.x), my = Math.round(PP.Input.mouse.y);
+        g2.fillStyle = 'rgba(255,255,255,0.8)';
+        g2.fillRect(mx - 3, my, 2, 1); g2.fillRect(mx + 2, my, 2, 1); g2.fillRect(mx, my - 3, 1, 2); g2.fillRect(mx, my + 2, 1, 2);
+      }
       this.drawPopups(m);
       this.drawRadar(m);
     }
@@ -349,7 +372,7 @@
       const g = this.ctx;
       const kit = p.isGK ? p.team.gkKit : p.team.kit;
       const x = this.sx(p.rx, p.ry), y = this.sy(p.ry);
-      const pal = { H: p.look.hair, S: p.look.skin, s: shade(p.look.skin), E: '#1a1a1a', T: kit.shirt, t: kit.shade, P: kit.shorts, K: kit.socks, B: '#151515' };
+      const pal = { H: p.look.hair, S: p.look.skin, s: shade(p.look.skin), q: shade(p.look.skin), E: '#1a1a1a', T: kit.shirt, t: kit.shade, P: kit.shorts, K: kit.socks, k: shade(kit.socks), B: '#151515' };
 
       if (p.slide > 0 || p.dive > 0 || p.stun > 0.25) { this.drawLying(p, x, y, pal); return; }
       const left = p.fx < -0.1 || (Math.abs(p.fx) <= 0.1 && p.team.dir < 0);
@@ -361,9 +384,9 @@
       } else if (p.kickAnim > 0) rows = sprite(HEAD, 'armB', 'knee', 'kick');
       else if (p.lunge > 0) rows = sprite(HEAD_LEAN, 'armA', 'wide', 'lunge');
       else if (speed > 0.6) {
-        const f = RUN[Math.floor(p.anim) % 4];
+        const f = RUN[Math.floor(p.anim) % RUN.length];
         rows = sprite(speed > 3 ? HEAD_LEAN : HEAD, f.torso, f.shorts, f.legs);
-        bob = f.bob;
+        bob = speed > 1.5 ? f.bob : 0;
       } else rows = sprite(HEAD, 'idle', 'idle', 'stand');
       const lean = p.lunge > 0 ? (left ? -1 : 1) : 0;
       const ox = x - 4 + (left ? -1 : 0) + lean, oy = y - rows.length + 1 + bob;

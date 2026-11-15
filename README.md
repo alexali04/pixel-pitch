@@ -18,11 +18,12 @@ then visit http://localhost:8765.
 |---|---|---|
 | WASD / Arrows | move (aims passes and shots) | move |
 | Shift | sprint | sprint |
-| J | ground pass | tackle (or go for a loose ball) |
-| K | lofted pass | slide tackle |
-| Space | pass or shoot: a shot if you're aiming at the goal mouth from within ~32m (a target appears on the goal), otherwise a pass | switch player |
+| J | ground pass | switch player |
+| K | lofted pass; aimed at goal from within ~26m (not from wide) it's a chip shot | slide tackle |
+| L | always shoot | |
+| Space | pass or shoot: a shot if you're aiming at the goal mouth from within ~32m (a target appears on the goal), otherwise a pass. From wide, it only shoots when aimed right at the goal; a team-mate in the box on your line means a cross | tackle (or go for a loose ball) |
 | J / Space with the ball in the air near you | header pass / header at goal | header clearance (Space) |
-| J with the ball loose on the floor | sprint to collect it | sprint to intercept it |
+| Space with the ball loose on the floor | sprint to collect it | sprint to intercept it |
 | P / Esc | pause | pause |
 | R | restart the match | restart the match |
 | M | mute / unmute sound | mute / unmute sound |
@@ -41,6 +42,23 @@ third, and turns back into play (or towards the box) rather than going straight 
 when you press J/K and then turns smoothly (~150°/s) towards whatever direction you hold, so
 you can stop it at any angle. A dashed line shows where the ball will go, and a ring marks the
 teammate who will get there first; they run onto it. Keepers can't handle back-passes.
+
+Keepers holding the ball: **J** rolls it out, **K** / **Space** kicks it.
+
+## Smoothness controls
+
+On the title screen or pause menu: **Pass assist** (off / light / strong), **Aim with** (direction
+keys / mouse), **Key aim speed**, **Auto-tackle**, **Auto-sprint on defence**. With mouse aim the
+keys only move your player; point to aim passes and shots, left click = Space, right click = K.
+**Defending assist** (when idle / always / off): your controlled defender takes up his AI role —
+press, cover, mark, or go to where a lofted ball will land — whenever you're not steering (or
+always, with your keys nudging him).
+
+When you press a pass button the aim is exactly the direction you're holding — except when you're
+right by a touchline holding straight at it, where it starts on a team-mate along the line instead. With the keys,
+a fresh press far from the current aim flicks it there instantly; holding a key
+glides it for fine adjustment. Soft passes prefer the nearer of two team-mates on a similar
+line; firm ones can find the far man (the near one lets it run).
 
 ## Modes
 
@@ -69,6 +87,27 @@ runners. An extra player presses on triggers (receiver facing his own goal, pinn
 touchline, a back pass), pressers curve their run to block the carrier's best pass (cover
 shadow), and defenders goal-side of a sprinting runner converge on him. Offside is enforced.
 Sprinting with the ball means bigger touches that defenders can nick.
+
+## What the stats do
+
+| Stat | Effect |
+|---|---|
+| pace / acceleration | top speed and how fast you get there |
+| agility | how much speed a sharp turn costs |
+| stamina | how fast sprinting drains energy (tired = slower) |
+| short / long passing, crossing, kicking (GK) | pass accuracy (crossing for wide balls in the final third) |
+| vision | AI pass choice: sees longer passes, picks better ones, leads runners more |
+| finishing / shot power / long shots | shot accuracy, speed, and accuracy from 20m+ |
+| composure | how much pressure hurts passes and shots |
+| dribbling / strength | size of sprint touches; resisting tackles and shielding |
+| first touch | how quickly a pass is brought under control |
+| tackling | tackle success |
+| positioning | how quickly a defender tracks shape shifts (poor = lags and drifts) |
+| marking | how tightly a defender picks up the nearest attacker |
+| heading | header accuracy and power |
+| reflexes / diving / handling / GK positioning | saves, dive reach and speed, catching vs parrying, smothering 1v1s |
+
+The pause screen (P) shows your XI's attributes, foot and traits.
 
 ## Layout
 

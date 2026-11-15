@@ -27,9 +27,5 @@ Teams should move as units through phases (attacking structure, rest defence, co
 recovery runs). Today it's per-player targets from a shared shape; a more explicit team-level
 plan (e.g. phase-of-play states with roles per state) would make movement more coherent.
 
-## Stage 3 remainder: every stat driving the sim
-Vision (pass choice), positioning/marking (defensive reactions), composure (pressure effects),
-agility (turning), plus GK distribution.
-
 ## Stage 4: season
 38-game league, coins, transfers/upgrades, fan and board happiness.

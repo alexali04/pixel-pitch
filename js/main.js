@@ -30,9 +30,9 @@
   const CONTROLS = `
     <div class="controls">
       <span class="h">Move</span><span><kbd>WASD</kbd> / <kbd>Arrows</kbd></span><span><kbd>Shift</kbd> sprint</span>
-      <span class="h">Attack</span><span><kbd>Space</kbd> pass or shoot</span><span><kbd>J</kbd> pass &nbsp;<kbd>K</kbd> lofted</span>
+      <span class="h">Attack</span><span><kbd>Space</kbd> pass or shoot &nbsp;<kbd>L</kbd> shoot</span><span><kbd>J</kbd> pass &nbsp;<kbd>K</kbd> lofted / chip</span>
       <span class="h">Strength</span><span>hold the button</span><span>tap = soft, hold = bullet</span>
-      <span class="h">Defend</span><span><kbd>J</kbd> tackle &nbsp;<kbd>K</kbd> slide</span><span><kbd>Space</kbd> switch</span>
+      <span class="h">Defend</span><span><kbd>Space</kbd> tackle &nbsp;<kbd>K</kbd> slide</span><span><kbd>J</kbd> switch</span>
       <span class="h">Game</span><span><kbd>P</kbd> pause &nbsp;<kbd>R</kbd> restart &nbsp;<kbd>M</kbd> mute</span><span>aim with direction keys</span>
     </div>`;
 
@@ -64,9 +64,11 @@
       <p>You attack right to left.</p>
       <p><button class="btn toggle" id="fcBtn">Full court: ${settings.fullCourt ? 'ON' : 'OFF'} (F)</button></p>
       <p class="hint">${settings.fullCourt ? 'Continuous 11v11: you defend too.' : 'You play your attacks; the CPU\'s attacks are resolved offscreen.'}</p>
+      <p><button class="btn toggle" id="smTitle">Smoothness controls</button></p>
       ${CONTROLS}
       <button class="btn" id="koBtn">Kick off (Enter)</button>`);
     $('fcBtn').addEventListener('click', () => { setFullCourt(!settings.fullCourt); titleScreen(); });
+    $('smTitle').addEventListener('click', () => smoothnessCard(titleScreen));
     $('koBtn').addEventListener('click', startMatch);
   }
 
@@ -110,9 +112,45 @@
       ${statsTable(match)}<button class="btn">Back to menu (Enter)</button>`, titleScreen);
   }
 
+  // Your XI with grouped attributes (these all feed the simulation).
+  function squadTable(team) {
+    const s = (p, ks) => Math.round(ks.reduce((a, k) => a + p.stats[k], 0) / ks.length);
+    const rows = team.players.map((p) => {
+      const st = p.isGK
+        ? [s(p, ['reflexes', 'diving']), s(p, ['handling']), s(p, ['gkPositioning']), s(p, ['kicking']), '-', s(p, ['strength', 'stamina'])]
+        : [s(p, ['pace', 'acceleration']), s(p, ['shortPass', 'longPass', 'vision']), s(p, ['finishing', 'shotPower', 'longShots']),
+           s(p, ['dribbling', 'firstTouch', 'agility']), s(p, ['tackling', 'marking', 'positioning']), s(p, ['strength', 'stamina'])];
+      const stars = PP.stars(PP.playerRating(p.role, p.stats));
+      return `<tr><td>${p.num}</td><td>${p.name}</td><td>${p.role}</td><td>${p.foot}</td>${st.map((v) => `<td>${v}</td>`).join('')}<td class="st">${'★'.repeat(Math.floor(stars))}${stars % 1 ? '½' : ''}</td><td class="tr">${p.trait || ''}</td></tr>`;
+    }).join('');
+    return `<table class="squad"><tr><th>#</th><th>Name</th><th>Pos</th><th>Ft</th><th>PAC</th><th>PAS</th><th>SHO</th><th>DRI</th><th>DEF</th><th>PHY</th><th></th><th></th></tr>${rows}</table>
+      <p class="hint">GK row: DIV / HAN / POS / KIC. ${team.style ? team.name + ': ' + team.style.epithet : ''}</p>`;
+  }
+
+  // "Smoothness" controls: click a row to cycle its value.
+  function smoothnessCard(back) {
+    const rows = Object.keys(PP.SETTING_LABELS).map((k) => {
+      const opts = PP.SETTING_OPTIONS[k], cur = opts.find((o) => o[0] === PP.settings[k]) || opts[0];
+      return `<tr data-k="${k}" class="opt"><td>${PP.SETTING_LABELS[k]}</td><td><button class="btn toggle">${cur[1]}</button></td></tr>`;
+    }).join('');
+    show(`<h2>Smoothness</h2><table class="stats smooth">${rows}</table>
+      <p class="hint">Click to change. Mouse aim: point to aim passes/shots, left click = Space, right click = K.</p>
+      <button class="btn" id="smBack">Back</button>`);
+    overlay.querySelectorAll('tr.opt').forEach((tr) => tr.addEventListener('click', () => {
+      const k = tr.dataset.k, opts = PP.SETTING_OPTIONS[k];
+      const i = opts.findIndex((o) => o[0] === PP.settings[k]);
+      PP.settings[k] = opts[(i + 1) % opts.length][0];
+      PP.saveSettings();
+      smoothnessCard(back);
+    }));
+    $('smBack').addEventListener('click', back);
+  }
+
   function pause() {
     screen = 'paused';
-    show(`<h2>Paused</h2>${CONTROLS}<button class="btn">Resume (Enter / P)</button>`, resume);
+    show(`<h2>Paused</h2>${squadTable(match.home)}${CONTROLS}<button class="btn" id="resBtn">Resume (Enter / P)</button> <button class="btn toggle" id="smBtn">Smoothness</button>`);
+    $('resBtn').addEventListener('click', resume);
+    $('smBtn').addEventListener('click', () => smoothnessCard(pause));
   }
   function resume() { hide(); screen = 'match'; }
 
@@ -144,6 +182,7 @@
       if (I.hit('pause')) { I.endStep(); pause(); }
       else {
         acc += dt;
+        match.mouseWorld = I.mouse ? R.screenToWorld(I.mouse.x, I.mouse.y) : null;
         while (acc >= C.DT) {
           match.step(C.DT, I);
           I.endStep();

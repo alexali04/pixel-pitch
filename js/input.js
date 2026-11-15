@@ -6,8 +6,9 @@
     right: ['ArrowRight', 'KeyD'],
     sprint: ['ShiftLeft', 'ShiftRight'],
     pass: ['KeyJ', 'KeyZ'],
-    lob: ['KeyK', 'KeyX'],
-    shoot: ['Space', 'KeyL', 'KeyC'],
+    lob: ['KeyK', 'KeyX', 'Mouse2'],
+    shoot: ['Space', 'KeyC', 'Mouse0'],
+    shootOnly: ['KeyL'],
     start: ['Enter', 'NumpadEnter'],
     pause: ['KeyP', 'Escape'],
     restart: ['KeyR'],
@@ -31,6 +32,17 @@
         this.rel[e.code] = true;
       });
       addEventListener('blur', () => { this.keys = {}; });
+      // Mouse: position (canvas pixels) for mouse aiming; buttons as virtual keys.
+      const cv = document.getElementById('game');
+      this.mouse = null;
+      cv.addEventListener('mousemove', (e) => {
+        const r = cv.getBoundingClientRect();
+        this.mouse = { x: ((e.clientX - r.left) / r.width) * cv.width, y: ((e.clientY - r.top) / r.height) * cv.height };
+      });
+      cv.addEventListener('mouseleave', () => { this.mouse = null; });
+      cv.addEventListener('mousedown', (e) => { const k = 'Mouse' + e.button; if (!this.keys[k]) this.pr[k] = true; this.keys[k] = true; e.preventDefault(); });
+      addEventListener('mouseup', (e) => { const k = 'Mouse' + e.button; if (this.keys[k]) this.rel[k] = true; this.keys[k] = false; });
+      cv.addEventListener('contextmenu', (e) => e.preventDefault());
     },
     down(a) { return BIND[a].some((k) => this.keys[k]); },
     hit(a) { return BIND[a].some((k) => this.pr[k]); },

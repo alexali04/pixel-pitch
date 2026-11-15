@@ -110,7 +110,9 @@
     }
     team.phase = phase;
 
-    const userCtl = team.isUser && !m.autoplay ? m.controlled : null;
+    const ctl = team.isUser && !m.autoplay ? m.controlled : null;
+    // A controlled defender on auto (defending assist) is treated as a normal AI player.
+    const userCtl = ctl && !(ctl.userAuto && phase === 'defend') ? ctl : null;
 
     // Who chases a loose ball.
     let chaser = null;
@@ -139,6 +141,9 @@
       const trig = AI.pressTrigger(m, owner);
       let n = cd < B.pressZone ? B.pressers : 0;
       if (trig && cd < B.pressZone + 0.2) n++;
+      const sinceLost = team.lostAt != null ? m.time - team.lostAt : 99;
+      if (team.block === 'high' && sinceLost < 2.5) n++;                  // counter-press
+      else if (team.block !== 'high' && sinceLost < 3 && cd > 0.45) n = 0; // drop off and get organised
       const maxEngaged = 2; // never a pack of defenders on one man: one presses, one covers
       n = Math.min(n, maxEngaged);
       const range = B.range + (trig ? 6 : 0);
@@ -178,9 +183,19 @@
       if (pressers.has(p)) { AI.press(m, p, owner, false); continue; }
       if (blockers.has(p)) { AI.press(m, p, owner, Math.hypot(owner.vx, owner.vy) > 5.5, 1.6); continue; }
       if (p === container) { AI.contain(m, p, owner); continue; }
-      const tg = AI.shapeTarget(m, team, p, phase, lineD);
+      const raw = AI.shapeTarget(m, team, p, phase, lineD);
+      // Positioning: good positional players track shape shifts quickly; poor ones lag and drift.
+      const pos = p.stats.positioning / 100;
+      if (p.tgx == null || m.state !== 'play') { p.tgx = raw.x; p.tgy = raw.y; }
+      const k = Math.min(1, dt * (1.5 + pos * 6));
+      p.tgx += (raw.x - p.tgx) * k; p.tgy += (raw.y - p.tgy) * k;
+      const wob = (1 - pos) * 2.2;
+      const tg = { x: p.tgx + Math.sin(m.time * 0.5 + p.idx * 1.7) * wob, y: p.tgy + Math.cos(m.time * 0.4 + p.idx * 2.3) * wob, sprint: raw.sprint };
+      if (phase === 'defend' && m.state === 'play') AI.mark(m, team, p, tg);
       const d = U.dist(p.x, p.y, tg.x, tg.y);
-      p.steer(tg.x, tg.y, d > 9 || tg.sprint, 2.5);
+      // Recovery: caught upfield of the ball after losing it -> sprint back into shape.
+      const upfield = phase === 'defend' && team.depth(p.x) > team.depth(b.x) + 0.02;
+      p.steer(tg.x, tg.y, d > 9 || tg.sprint || (upfield && d > 3), 2.5);
       if (d < 1.5) p.face(b.x, b.y);
     }
   };
@@ -209,6 +224,8 @@
     } else {
       const B = AI.BLOCKS[team.block || 'mid'], comp = team.compact ?? 0.5;
       let line = B.line + (ballD - 0.5) * 0.18;                // breathe with the ball
+      const sinceLost = team.lostAt != null ? m.time - team.lostAt : 99;
+      if (sinceLost < 4 && !(team.block === 'high' && sinceLost < 2.5)) line -= 0.06 * (1 - sinceLost / 4); // retreat after losing it
       line = Math.min(line, ballD - 0.07);                      // stay goal-side of it
       line = Math.min(line, AI.runnerDepth(m, team) - 0.01);     // drop off with runners
       line = Math.max(line, 0.055);
@@ -251,6 +268,21 @@
     const t = team.toWorld(spot[0], spot[1]);
     t.sprint = false;
     return t;
+  };
+
+  // Marking: tighten onto the nearest attacker in your zone, goal-side of him, by how good a
+  // marker you are.
+  AI.mark = function (m, team, p, tg) {
+    let o = null, bd = 8;
+    for (const q of m.other(team).players) {
+      if (q.isGK || q.hasBall) continue;
+      const d = U.dist(q.x, q.y, tg.x, tg.y);
+      if (d < bd) { bd = d; o = q; }
+    }
+    if (!o) return;
+    const n = U.norm(team.ownX - o.x, C.H / 2 - o.y);
+    const gx = o.x + n.x * 1.6, gy = o.y + n.y * 1.6, w = (p.stats.marking / 100) * 0.5;
+    tg.x += (gx - tg.x) * w; tg.y += (gy - tg.y) * w;
   };
 
   // The carrier's most dangerous forward outlet (for cover shadows).
@@ -354,11 +386,13 @@
       const back = lk && lk.by === q && m.time - lk.t < 3 ? 0.4 : 0;
       const free = Math.min(open, 8) / 8;
       const square = gain < 0.02 ? 0.25 : 0;
-      let s = gain * 5 + U.clamp(lane / 2.5, -1, 1) * 0.8 + free * 0.5 - d / 50 - 0.4 - back - square + U.rand(-0.1, 0.1);
+      const noise = 0.18 * (1.5 - p.stats.vision / 100);
+      let s = gain * 5 + U.clamp(lane / 2.5, -1, 1) * 0.8 + free * 0.5 - d / 50 - 0.4 - back - square + U.rand(-noise, noise);
+      if (d > 18 + p.stats.vision * 0.3) s -= 0.6; // beyond what he sees
       if (lane < 0) s -= 2;
       out.push({ kind: 'pass', target: q, lofted: false, score: s, lane });
       if (d > 14) {
-        let sl = gain * 5 + U.clamp(landM / 3, -1, 1) * 0.9 - 0.6 - d / 70 - back + U.rand(-0.1, 0.1);
+        let sl = gain * 5 + U.clamp(landM / 3, -1, 1) * 0.9 - 0.6 - d / 70 - back + U.rand(-noise, noise);
         if (landM < 0) sl -= 2;
         out.push({ kind: 'pass', target: q, lofted: true, score: sl, lane: landM });
       }
@@ -441,6 +475,10 @@
       if (q) { m.passTo(p, q, true); return; }
     }
     let opts = AI.passOptions(m, p, r.kind === 'throw' ? 22 : 50);
+    if (r.kind === 'gk') {
+      const roll = opts.find((o) => !o.lofted && o.lane > 1 && U.dist(p.x, p.y, o.target.x, o.target.y) < 28);
+      if (roll && Math.random() < 0.7) { m.passTo(p, roll.target, false); return; } // roll it out
+    }
     if (r.kind === 'throw' || r.kind === 'kickoff') opts = opts.filter((o) => !o.lofted || r.kind === 'throw');
     if (r.kind === 'kickoff') {
       if (r.partner && Math.random() < 0.7) { m.passTo(p, r.partner, false); return; }

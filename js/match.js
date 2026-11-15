@@ -151,6 +151,7 @@
       if (this.state === 'between') return;
       if (!this.fullCourt && this.phase && !gk.team.isUser) { this.endPhase('saved', gk.x); return; }
       this.setRestart('gk', gk.team, gk, gk.x + gk.fx * 0.35, gk.y + gk.fy * 0.35);
+      if (gk.team.isUser) this.say('J: roll it out   K: kick it', 1.8);
     }
 
     endRestart() {
@@ -191,9 +192,16 @@
       this.endRestart();
       for (const q of this.players) q.receiving = null;
       if (target) target.receiving = { t: this.time };
-      if (type === 'pass' && target) {
-        const sp = Math.max(6, Math.hypot(b.vx, b.vy)), t = U.dist(b.x, b.y, target.x, target.y) / sp;
-        b.lastKick.rx = target.x + target.vx * t; b.lastKick.ry = target.y + target.vy * t;
+      if ((type === 'pass' || type === 'clear') && (target || b.vz > 1)) {
+        if (b.vz > 1) {
+          // In the air: where will it come down to a playable height?
+          const path = b.predict(40, 0.1);
+          const land = path.find((q, i) => i > 2 && q.z < 1.6) || path[path.length - 1];
+          b.lastKick.rx = land.x; b.lastKick.ry = land.y;
+        } else {
+          const sp = Math.max(6, Math.hypot(b.vx, b.vy)), t = U.dist(b.x, b.y, target.x, target.y) / sp;
+          b.lastKick.rx = target.x + target.vx * t; b.lastKick.ry = target.y + target.vy * t;
+        }
         if (!p.team.isUser && !this.autoplay) {
           const c = this.bestDefender(b.lastKick.rx, b.lastKick.ry);
           if (c) { if (this.controlled) this.controlled.userAuto = false; this.controlled = c; this.lastAutoSwitch = this.time; }
@@ -207,8 +215,8 @@
     kickTo(p, tx, ty, lofted, type, target, power = null, v0 = null) {
       const b = this.ball;
       const D0 = Math.max(1, U.dist(b.x, b.y, tx, ty));
-      const skill = (lofted ? p.stats.longPass : p.stats.shortPass) / 100;
-      const angErr = (0.015 + D0 * 0.0012) * (1.6 - skill) * (1 + this.pressureOn(p) * 0.6) * (p.team.isUser ? 1 : Match.CPU_ERR);
+      const skill = Match.passSkill(p, lofted) / 100;
+      const angErr = (0.015 + D0 * 0.0012) * (1.6 - skill) * (1 + this.pressureOn(p) * (1.2 - p.stats.composure / 100)) * (p.team.isUser ? 1 : Match.CPU_ERR);
       const dir = U.rot((tx - b.x) / D0, (ty - b.y) / D0, U.gauss() * angErr);
       const D = D0 * (1 + U.gauss() * 0.05 * (1.6 - skill));
       let T0;
@@ -243,7 +251,8 @@
         const t = lofted ? Ball.loftTime(D) * (power == null ? 1 : 1.3 - power * 0.55)
           : v0 != null ? (Ball.rollTime(v0, D) ?? Ball.groundRun(v0, 0).t)
           : Ball.groundTime(D, Match.arrivalSpeed(D));
-        tx = q.x + q.vx * t * 0.8; ty = q.y + q.vy * t * 0.8;
+        const lead = 0.5 + p.stats.vision * 0.005; // better vision = passes into the runner's path
+        tx = q.x + q.vx * t * lead; ty = q.y + q.vy * t * lead;
       }
       return { x: U.clamp(tx, 0.5, C.W - 0.5), y: U.clamp(ty, 0.5, C.H - 0.5) };
     }
@@ -260,7 +269,8 @@
       let vx, vy, vz;
       if (!lofted) {
         let v0 = vOverride ?? Match.userGroundSpeed(power);
-        if (p.isGK) v0 = Math.max(v0, 13);              // keepers play it firmer
+        const inHands = this.state === 'restart' && this.restart && this.restart.kind === 'gk' && this.restart.taker === p;
+        if (p.isGK && !inHands) v0 = Math.max(v0, 13);  // keepers kick it firmer; a roll-out stays soft
         vx = nx * v0; vy = ny * v0; vz = v0 > 18 ? (v0 - 18) * 0.35 : 0; // driven passes skim up
       } else {
         // A chip always rises in a clear arc; holding longer sends it further and higher.
@@ -293,6 +303,15 @@
           }
         }
       }
+      const pref = this.assistPick;
+      if (pref && pref.team === p.team && pref !== target) {
+        const sp = pref.topSpeed(true);
+        for (let i = 0; i < path.length; i++) {
+          const pt = path[i];
+          if (pt.z > 1.8) continue;
+          if (Math.max(0, U.dist(pref.x, pref.y, pt.x, pt.y) - 0.6) / sp + 0.2 <= (i + 1) * 0.1) { target = pref; break; }
+        }
+      }
       if (!target) target = this.nearestUser(end.x, end.y, p);
       // Back-pass to our keeper: make sure it actually gets to him.
       if (target && target.isGK && !lofted && vOverride == null) {
@@ -317,7 +336,8 @@
       const fin = p.stats.finishing / 100, pow = p.stats.shotPower / 100;
       power = U.clamp(power, 0.15, 1);
       const speed = 19 + 9 * power + 6 * pow * power;   // tap ~20 m/s, full wind-up ~32 m/s
-      const angErr = (0.035 + D * 0.002 + power * power * 0.06 + pressure * 0.07) * (1.6 - fin) * (team.isUser ? 1 : Match.CPU_ERR);
+      const longShot = D > 20 ? 1 + (D - 20) * 0.02 * (1.3 - p.stats.longShots / 100) : 1;
+      const angErr = (0.035 + D * 0.002 + power * power * 0.06 + pressure * 0.09 * (1.3 - p.stats.composure / 100)) * (1.6 - fin) * longShot * (team.isUser ? 1 : Match.CPU_ERR);
       const dir = U.rot((gx - b.x) / D, (ty - b.y) / D, U.gauss() * angErr);
       const t = D / speed;
       const h = Math.max(0.1, 0.35 + power * 1.25 + U.gauss() * (0.35 + power * 0.8 + pressure * 0.5) * (1.5 - fin));
@@ -326,6 +346,26 @@
       b.z = 0.05;
       this.stats.shots[this.idx(team)]++;
       this.release(p, 'shot', null);
+    }
+
+    // Chip: lifted over the keeper to drop under the bar. More hold = higher and harder, but
+    // also less control.
+    chipShot(p, aimY, power) {
+      const b = this.ball, team = p.team, gx = team.attackX;
+      const ty = C.H / 2 + U.clamp(aimY, -1, 1) * 3.0;
+      const fin = p.stats.finishing / 100, pressure = this.pressureOn(p);
+      const err = (0.04 + power * 0.05 + pressure * 0.06 * (1.3 - p.stats.composure / 100)) * (1.6 - fin);
+      const D = U.dist(b.x, b.y, gx, ty) * (1 + U.gauss() * err * 0.6);
+      const dir = U.rot((gx - b.x), (ty - b.y), U.gauss() * err);
+      const n = U.norm(dir.x, dir.y);
+      const T = 0.9 + D / 16 + power * 0.35;                  // hang time
+      const h = 1.5 + U.gauss() * 0.4 * (1.5 - fin);        // height as it crosses the line
+      const s = (D * C.AIR_K) / (1 - Math.exp(-C.AIR_K * T));
+      b.vx = n.x * s; b.vy = n.y * s;
+      b.vz = (h + 0.5 * C.G * T * T) / T; b.z = 0.05;
+      this.stats.shots[this.idx(team)]++;
+      this.release(p, 'shot', null);
+      this.pop(p, 'CHIP', '#9fd3ff');
     }
 
     // Standing tackles have a short visible wind-up before they resolve.
@@ -350,6 +390,7 @@
     // Your defenders take the ball off a CPU attacker who runs into them.
     bodyChecks() {
       const b = this.ball, c = b.owner;
+      if (!PP.settings.autoTackle && !this.autoplay) return;
       if (!c || c.team.isUser || this.state !== 'play' || c.isGK) return;
       const sp = Math.hypot(c.vx, c.vy);
       for (const d of this.home.outfield()) {
@@ -375,11 +416,12 @@
       let ch = (slide ? 0.62 : t.team.isUser ? 0.78 : 0.42) + Math.max(0, front) * 0.12 + (t.stats.tackling - hold) * 0.007;
       if (front < -0.3) ch *= t.team.isUser ? 0.85 : 0.5; // carrier is shielding it
       if (this.time < b.protectUntil) ch *= 0.25;  // just received it
+      if (this.time < (c.settleUntil || 0)) ch += 0.2; // ball not under control yet
       ch = U.clamp(ch, 0.06, 0.85);
       if (auto) ch = U.clamp(0.82 + (t.stats.tackling - hold) * 0.006, 0.5, 0.94) * (this.time < b.protectUntil ? 0.6 : 1) * (front < -0.3 ? 0.8 : 1);
       const userLost = c.team.isUser, userWon = t.team.isUser;
       if (Math.random() < ch) {
-        c.stun = auto ? 0.75 : 0.5; c.kickCd = 0.5; // auto = he ran into you and goes down
+        c.stun = slide ? 1.4 : auto ? 1.2 : 1.0; c.kickCd = 0.8; // he's on the floor for a moment
         this.sfx('tackle');
         if (auto) { this.pop(c, 'TACKLED!', '#ffd23f'); this.gainPossession(t); return; }
         this.pop(c, 'TACKLED!', userLost ? '#e4572e' : '#ffd23f');
@@ -416,14 +458,15 @@
     gainPossession(p) {
       const b = this.ball;
       if (this.checkOffside(p)) return;
+      if (this.possTeam !== p.team) { this.other(p.team).lostAt = this.time; p.team.lostAt = null; this.possTeam = p.team; }
       // Bringing a ball under control takes a moment: longer for fast or dropping balls and for
       // poorer first touches. Until then you can't play it (a pass/shot waits).
       const inSpd = Math.hypot(b.vx, b.vy), inZ = b.z;
-      const settle = U.clamp((0.06 + Math.max(0, inSpd - 8) * 0.025 + (inZ > 0.4 ? 0.25 + inZ * 0.2 : 0)) * (1.5 - p.stats.firstTouch / 100), 0, 0.9);
+      const settle = U.clamp((0.06 + Math.max(0, inSpd - 8) * 0.025 + (inZ > 0.4 ? 0.25 + inZ * 0.2 : 0)) * (1.5 - p.stats.firstTouch / 100) * (p.team.isUser ? 1 : 1.35), 0, 1.1);
       p.settleUntil = this.time + settle; p.settleLen = settle;
       b.owner = p; b.lastTouch = p;
       b.vx = b.vy = b.vz = 0; b.z = 0; b.curve = 0;
-      b.protectUntil = this.time + 0.7;
+      b.protectUntil = this.time + (p.team.isUser ? 0.7 : 0.3); // CPU receivers are less protected
       p.think = Math.max(U.rand(0.3, 0.6), p.settleLen + 0.1); p.plan = null; p.gotBallAt = this.time;
       for (const q of this.players) q.receiving = null;
       if (p.team.isUser) {
@@ -452,13 +495,55 @@
       this.manualUntil = this.time + 0.5;
     }
 
+    // Where the aim starts when you press a pass button: the most sensible team-mate within ~70
+    // degrees of the direction you're holding (so running at the touchline doesn't mean passing
+    // out of play), else just that direction.
+    startAim(p, dir, lofted) {
+      if (PP.settings.aim === 'mouse' || PP.settings.passAssist === 'off') return dir;
+      const team = p.team, b = this.ball;
+      const atLine = (b.y < 7 && dir.y < -0.7) || (b.y > C.H - 7 && dir.y > 0.7);
+      if (!atLine) return dir; // anywhere else, the aim is exactly what you're holding
+      let best = null, bs = -1e9;
+      for (const q of team.players) {
+        if (q === p || q.isDown() || q.isGK) continue;
+        const lx = q.x + q.vx * 0.6, ly = q.y + q.vy * 0.6, d = U.dist(b.x, b.y, lx, ly);
+        if (d < 5 || d > (lofted ? 50 : 35)) continue;
+        const n = U.norm(lx - b.x, ly - b.y);
+        const inward = -Math.sign(dir.y) * n.y;               // not out of play
+        if (inward < -0.05) continue;
+        const cos = (1 - Math.abs(n.y)) * 1.2;                // along the line: orthogonal to what you held
+        let open = 1e9;
+        for (const o of this.other(team).players) open = Math.min(open, U.dist(o.x, o.y, lx, ly));
+        const fwd = (team.depth(lx) - team.depth(b.x)) * 4;
+        const s = cos * 1.5 + fwd * 0.5 + Math.min(open, 6) / 6 - d / 60;
+        if (s > bs) { bs = s; best = n; }
+      }
+      // Holding straight at a touchline with nobody there: point it back infield a bit.
+      if (!best && ((b.y < 6 && dir.y < -0.7) || (b.y > C.H - 6 && dir.y > 0.7))) return U.norm(team.dir, -Math.sign(dir.y) * 0.3);
+      return best || dir;
+    }
+
     // Space decides for you: aiming at the goal mouth from shooting range means a shot.
-    shotAim(p, aim) {
+    shotAim(p, aim, chip = false, force = false) {
       const t = p.team, b = this.ball, gx = t.attackX;
       if ((gx - b.x) * aim.x <= 0.05) return null;
-      if (U.dist(b.x, b.y, gx, C.H / 2) > 32) return null;
+      if (U.dist(b.x, b.y, gx, C.H / 2) > (force ? 40 : chip ? 26 : 32)) return null;
       const gy = b.y + (aim.y / aim.x) * (gx - b.x);
-      if (Math.abs(gy - C.H / 2) > C.GOAL_W / 2 + 2.2) return null;
+      const wide = Math.abs(b.y - C.H / 2);
+      // From a wide angle Space only shoots if you aim right at the goal mouth, and a
+      // team-mate in the box on your line means a cross. L always shoots.
+      const margin = force ? 6 : wide > 10 ? 0.4 : 2.2;
+      if (Math.abs(gy - C.H / 2) > C.GOAL_W / 2 + margin) return null;
+      if (!force) {
+        if (chip && wide > 12) return null;
+        const aa = Math.atan2(aim.y, aim.x);
+        for (const q of t.players) {
+          if (q === p || q.isGK || !PP.AI.inBox(this.other(t), q.x, q.y, 2)) continue;
+          let da = Math.atan2(q.y - b.y, q.x - b.x) - aa;
+          while (da > Math.PI) da -= 2 * Math.PI; while (da < -Math.PI) da += 2 * Math.PI;
+          if (Math.abs(da) < (wide > 10 ? 0.3 : 0.12)) return null; // looks like a cross / pass
+        }
+      }
       return { gx, gy: U.clamp(gy, C.GOAL_Y1 + 0.3, C.GOAL_Y2 - 0.3), aimY: U.clamp((gy - C.H / 2) / 3.2, -1, 1) };
     }
 
@@ -468,24 +553,37 @@
     assistAim(p, aim, lofted, power) {
       const team = p.team, b = this.ball, base = Math.atan2(aim.y, aim.x);
       const wrap = (a) => { while (a > Math.PI) a -= 2 * Math.PI; while (a < -Math.PI) a += 2 * Math.PI; return a; };
+      const level = PP.settings.passAssist;
+      this.assistPick = null;
+      if (level === 'off') return aim;
+      const strong = level === 'strong';
       let ang = base;
-      // 1. a team-mate's lead point within ~14 degrees: bend 70% of the way onto it
-      let best = null, bd = 0.25;
+      // 1. a team-mate's lead point close to the line: bend most of the way onto it. Among
+      //    similar angles prefer the one the pass will actually reach (a soft pass -> the
+      //    nearer man; a firm one can still find the far man).
+      const reach = lofted ? 7 + power * 38 : Ball.rollDist(Match.userGroundSpeed(power));
+      const window = strong ? 0.38 : 0.25;
+      let best = null, bs = 1e9;
       for (const q of team.players) {
         if (q === p || q.isDown() || q.isGK) continue;
         const lx = q.x + q.vx * 0.8 + team.dir * (Math.hypot(q.vx, q.vy) > 3 ? 2 : 0), ly = q.y + q.vy * 0.8;
         const d = U.dist(b.x, b.y, lx, ly);
         if (d < 4 || d > 45) continue;
-        const da = Math.abs(wrap(Math.atan2(ly - b.y, lx - b.x) - base));
-        if (da < bd) { bd = da; best = wrap(Math.atan2(ly - b.y, lx - b.x) - base); }
+        const da = wrap(Math.atan2(ly - b.y, lx - b.x) - base);
+        if (Math.abs(da) > window) continue;
+        const score = Math.abs(da) + Math.max(0, d - reach) / Math.max(reach, 6) * 0.25;
+        if (score < bs) { bs = score; best = da; this.assistPick = q; }
       }
-      if (best != null) ang = base + best * 0.7;
+      if (best == null) this.assistPick = null;
+      if (best != null) ang = base + best * (strong ? 0.95 : 0.7);
       else if (team.depth(b.x) > 0.6) {
-        // 2. final third: lean up to ~8 degrees towards the middle of their goal
+        // 2. final third: lean a few degrees towards the middle of their goal
         const g = wrap(Math.atan2(C.H / 2 - b.y, team.attackX - b.x) - base);
-        if (Math.abs(g) < 1.4) ang = base + U.clamp(g, -0.14, 0.14);
+        if (Math.abs(g) < 1.4) ang = base + U.clamp(g, strong ? -0.24 : -0.14, strong ? 0.24 : 0.14);
       }
-      // 3. don't put it out of play: turn it back infield (up to ~35 degrees)
+      // 3. don't put it out of play: turn it back infield. Big corrections only right by a line.
+      const byLine = b.y < 7 || b.y > C.H - 7 || team.depth(b.x) > 0.9;
+      const maxTurn = byLine ? 1.4 : 0.5;
       for (let i = 0; i < 18; i++) {
         const pl = this.passPlan(p, Math.cos(ang), Math.sin(ang), lofted, power);
         const inY = pl.y > 0.8 && pl.y < C.H - 0.8, inX = pl.x > 0.5 && pl.x < C.W - 0.5;
@@ -494,21 +592,21 @@
         const tx = team.depth(b.x) > 0.55 ? team.attackX - team.dir * C.SPOT : (team.attackX + C.W / 2) / 2;
         const toward = wrap(Math.atan2(C.H / 2 - b.y, tx - b.x) - ang);
         ang += Math.sign(toward) * 0.05;
-        if (Math.abs(wrap(ang - base)) > 0.9) break;
+        if (Math.abs(wrap(ang - base)) > maxTurn) break;
       }
       return { x: Math.cos(ang), y: Math.sin(ang) };
     }
 
     userPass(p, plan) {
       const b = this.ball;
-      const skill = (plan.lofted ? p.stats.longPass : p.stats.shortPass) / 100;
+      const skill = Match.passSkill(p, plan.lofted) / 100;
       const D = U.dist(b.x, b.y, plan.x, plan.y);
-      let angErr = (0.012 + D * 0.001) * (1.6 - skill) * (1 + this.pressureOn(p) * 0.6);
+      let angErr = (0.006 + D * 0.0006) * (1.5 - skill) * (1 + this.pressureOn(p) * (1.2 - p.stats.composure / 100));
       const sp = Math.hypot(p.vx, p.vy);
       if (sp > 1.5) { // passing across your run at speed is harder
         const pn = Math.hypot(plan.vx, plan.vy) || 1;
         const off = Math.acos(U.clamp((p.vx * plan.vx + p.vy * plan.vy) / (sp * pn), -1, 1));
-        angErr *= 1 + (sp / p.topSpeed(true)) * (off / Math.PI) * 0.8;
+        angErr *= 1 + (sp / p.topSpeed(true)) * (off / Math.PI) * 0.5;
       }
       const v = U.rot(plan.vx, plan.vy, U.gauss() * angErr);
       const k = 1 + U.gauss() * 0.03 * (1.6 - skill);
@@ -550,7 +648,7 @@
       const active = !!(ax.x || ax.y);
       const b = this.ball;
       const theirBall = (b.owner && !b.owner.team.isUser) || (!b.owner && b.lastKick && !b.lastKick.team.isUser);
-      const sprint = I.down('sprint') || (theirBall && b.owner !== p && this.home.depth(b.x) < 0.38); // danger: run
+      const sprint = I.down('sprint') || (PP.settings.autoSprint && theirBall && b.owner !== p && this.home.depth(b.x) < 0.38); // danger: run
       const lkt = b.lastKick;
       const ownTouch = !b.owner && lkt && lkt.type === 'touch' && lkt.by === p && this.time - lkt.t < 0.8;
       const hasBall = b.owner === p;
@@ -562,6 +660,14 @@
       const steering = active && !this.latch;
       const recv = !!(p.receiving && !b.owner);
       p.userAuto = recv && !steering;
+      // Defending assist: your defender takes up his AI role (press / cover / mark / chase the
+      // landing spot) when you're not steering, or always with your input as a nudge.
+      const da = PP.settings.defAssist;
+      this.defNudge = null;
+      if (theirBall && !hasBall && !recv && this.state === 'play' && da !== 'off' && !p.isGK) {
+        if (!steering) p.userAuto = true;
+        else if (da === 'always') { p.userAuto = true; this.defNudge = U.norm(ax.x, ax.y); }
+      }
       let blended = false;
       if (steering && recv && !p.isDown() && p.lunge <= 0) {
         // Negotiate: keep running onto the pass, nudged by the stick. Only a firm opposite
@@ -577,6 +683,8 @@
         else if (p.frozen) {
           if (active) { const n = U.norm(ax.x, ax.y); p.fx = n.x; p.fy = n.y; }
           p.stop();
+        } else if (hasBall && this.charging && PP.settings.aim === 'mouse') {
+          p.move(ax.x, ax.y, sprint);                   // mouse aims, keys keep steering
         } else if (hasBall && this.charging && this.runDir) {
           p.move(this.runDir.x, this.runDir.y, sprint); // keep the run going; the keys aim the pass
         } else if (!(hasBall && this.charging)) p.move(ax.x, ax.y, sprint);
@@ -592,16 +700,17 @@
           this.bufferedPress = null;
           if (this.heldOnGain) this.heldOnGain = this.heldOnGain.filter((k) => I.down(k));
           const fresh = (k) => I.hit(k) && !(this.heldOnGain || []).includes(k);
-          const hitKind = fresh('pass') ? 'pass' : fresh('lob') ? 'lob' : fresh('shoot') ? 'shoot' : bp;
-          const kind = hitKind === 'shoot' ? (setPiece ? 'lob' : 'smart') : hitKind;
+          const hitKind = fresh('pass') ? 'pass' : fresh('lob') ? 'lob' : fresh('shoot') ? 'shoot' : fresh('shootOnly') ? 'shootOnly' : bp;
+          const kind = hitKind === 'shoot' ? (setPiece ? 'lob' : 'smart') : hitKind === 'shootOnly' ? (setPiece ? 'lob' : 'shot') : hitKind;
           if (kind) {
             this.charging = true; this.chargeKind = kind; this.charge = 0; this.releaseQueued = false;
             this.prevKeys = (ax.x ? 1 : 0) + (ax.y ? 1 : 0); this.aimHold = 0;
             const sp = Math.hypot(p.vx, p.vy);
             this.runDir = sp > 1.5 ? { x: p.vx / sp, y: p.vy / sp } : null;
-            this.chargeBtn = hitKind === 'shoot' ? 'shoot' : kind;
+            this.chargeBtn = hitKind === 'shoot' || hitKind === 'shootOnly' ? hitKind : kind;
             // Aim starts where you're pointing (or facing) ...
-            this.aim = active ? U.norm(ax.x, ax.y) : { x: p.fx, y: p.fy };
+            this.aim = this.startAim(p, active ? U.norm(ax.x, ax.y) : { x: p.fx, y: p.fy }, kind === 'lob');
+            this.lastAx = { x: ax.x, y: ax.y };
           }
         }
         this.preview = null;
@@ -611,18 +720,27 @@
           if (I.down(this.chargeBtn) && !this.releaseQueued) this.charge = Math.min(1, this.charge + dt / fill);
           // ... and turns smoothly towards the held direction, so any angle is reachable.
           const nKeys = (ax.x ? 1 : 0) + (ax.y ? 1 : 0);
+          this.lastAxPrev = this.lastAx;
           if (nKeys < (this.prevKeys || 0)) this.aimHold = this.time + 0.2; // a key was just let go
           this.prevKeys = nKeys;
-          if (active && this.time > (this.aimHold || 0)) {
+          const mouseAim = PP.settings.aim === 'mouse' && this.mouseWorld;
+          if (mouseAim) {
+            const n = U.norm(this.mouseWorld.x - b.x, this.mouseWorld.y - b.y);
+            if (n.x || n.y) this.aim = n;
+          } else if (active && this.time > (this.aimHold || 0)) {
             const want = Math.atan2(ax.y, ax.x), cur = Math.atan2(this.aim.y, this.aim.x);
             let da = want - cur;
             while (da > Math.PI) da -= 2 * Math.PI;
             while (da < -Math.PI) da += 2 * Math.PI;
+            const newKey = (ax.x !== (this.lastAx || {}).x || ax.y !== (this.lastAx || {}).y);
             this.aimHeld = this.aimDir === Math.sign(da) ? (this.aimHeld || 0) + dt : 0;
             this.aimDir = Math.sign(da);
-            const rate = Math.min(Match.AIM_TURN_MAX, Match.AIM_TURN + this.aimHeld * 9);
+            const spd = { slow: 0.7, normal: 1, fast: 1.5 }[PP.settings.aimSpeed] || 1;
+            const rate = Math.min(Match.AIM_TURN_MAX, Match.AIM_TURN + this.aimHeld * 9) * spd;
             const ease = Math.min(1, Math.abs(da) / 0.35); // glide into the target angle
-            let a = cur + Math.sign(da) * Math.min(Math.abs(da), rate * dt * Math.max(0.35, ease));
+            // A fresh press far from the current aim is a flick: jump straight there.
+            let a = newKey && Math.abs(da) > 1.0 ? want
+              : cur + Math.sign(da) * Math.min(Math.abs(da), rate * dt * Math.max(0.35, ease));
             // At a sprint you can't play it back over your shoulder: aim stays within ~100° of the run.
             if (this.runDir && Math.hypot(p.vx, p.vy) > p.topSpeed(false) * 1.05) {
               const run = Math.atan2(this.runDir.y, this.runDir.x);
@@ -633,8 +751,12 @@
             }
             this.aim = { x: Math.cos(a), y: Math.sin(a) };
           }
-          const shot = this.chargeKind === 'smart' ? this.shotAim(p, this.aim) : null;
-          if (shot) this.preview = { shot: true, x: shot.gx, y: shot.gy, aimY: shot.aimY };
+          this.lastAx = { x: ax.x, y: ax.y };
+          const shot = this.chargeKind === 'smart' || (this.chargeKind === 'lob' && !restart) ? this.shotAim(p, this.aim, this.chargeKind === 'lob') : null;
+          if (this.chargeKind === 'shot') {
+            const fs = this.shotAim(p, this.aim, false, true);
+            this.preview = fs ? { shot: true, x: fs.gx, y: fs.gy, aimY: fs.aimY } : { shot: true, x: p.team.attackX, y: C.H / 2, aimY: 0 };
+          } else if (shot) this.preview = { shot: true, chip: this.chargeKind === 'lob', x: shot.gx, y: shot.gy, aimY: shot.aimY };
           else if (this.chargeKind !== 'shot') {
             const lob = this.chargeKind === 'lob';
             const a = this.assistAim(p, this.aim, lob, this.charge);
@@ -643,10 +765,12 @@
           if (I.released(this.chargeBtn) || !I.down(this.chargeBtn)) this.releaseQueued = true;
           if (this.releaseQueued && this.time >= (p.settleUntil || 0)) {
             this.releaseQueued = false;
-            const k = this.chargeKind === 'smart' ? (this.preview && this.preview.shot ? 'shot' : 'pass') : this.chargeKind;
+            const pvShot = this.preview && this.preview.shot;
+            const k = this.chargeKind === 'smart' ? (pvShot ? 'shot' : 'pass') : this.chargeKind === 'lob' && pvShot ? 'chip' : this.chargeKind;
             const pw = this.charge;
             this.charging = false; this.charge = 0; this.chargeKind = null;
             if (k === 'shot') this.shoot(p, this.preview && this.preview.shot ? this.preview.aimY : ax.y, pw);
+            else if (k === 'chip') this.chipShot(p, this.preview.aimY, pw);
             else {
               const a = this.assistAim(p, this.aim, k === 'lob', pw);
               this.userPass(p, this.passPlan(p, a.x, a.y, k === 'lob', pw));
@@ -662,23 +786,24 @@
         if (I.hit('pass') || I.hit('lob') || I.hit('shoot')) this.bufferedPress = { t: this.time, kind: I.hit('pass') ? 'pass' : I.hit('lob') ? 'lob' : 'shoot' };
       } else {
         this.charging = false; this.charge = 0; this.chargeKind = null; this.preview = null;
-        // Without the ball: J = tackle (or header pass / go for a loose ball), K = slide,
-        // Space = switch player (or a header at goal / clearance when the ball is in the air).
+        // Without the ball: Space = tackle (header at goal / clearance if it's in the air, sprint
+        // to it if it's loose), J = switch player (header pass if it's our ball in the air),
+        // K = slide.
         const aerial = this.aerialFor(p);
         const ours = !b.owner && b.lastKick && b.lastKick.team === p.team;
-        if (I.hit('pass')) {
-          if (aerial && ours) this.queueHeader(p, 'pass', ax);
-          else if (b.owner && b.owner.team !== p.team) this.tryTackle(p);
-          else if (!b.owner) { p.receiving = { t: this.time }; this.pop(p, 'GO!', '#9fd3c7'); }
-        } else if (I.hit('shoot')) {
+        if (I.hit('shoot')) {
           if (aerial) {
             const d = p.team.depth(b.x);
             this.queueHeader(p, d > 0.68 ? 'shoot' : d < 0.4 && !ours ? 'clear' : 'pass', ax);
-          } else this.switchPlayer();
+          } else if (b.owner && b.owner.team !== p.team) this.tryTackle(p);
+          else if (!b.owner) { p.receiving = { t: this.time }; this.pop(p, 'GO!', '#9fd3c7'); }
+        } else if (I.hit('pass')) {
+          if (aerial && ours) this.queueHeader(p, 'pass', ax);
+          else this.switchPlayer();
         } else if (I.hit('lob')) this.trySlide(p);
         // Auto-poke: get close enough and your defender has a go on their own.
         const c = b.owner;
-        if (c && c.team !== p.team && this.state === 'play' && p.lunge <= 0 && !p.isDown() &&
+        if (PP.settings.autoTackle && c && c.team !== p.team && this.state === 'play' && p.lunge <= 0 && !p.isDown() &&
             p.tackleCd <= 0 && this.time > b.protectUntil && U.dist(p.x, p.y, c.x, c.y) < 2.8) {
           this.tryTackle(p);
           p.tackleCd = 0.9;
@@ -752,7 +877,7 @@
       if (c && c.receiving && !b.owner) return;                   // he's going for the ball
       if (this.time - (this.lastAutoSwitch || 0) < 0.25) return; // stop flicker between two equals
       let bx = b.x + b.vx * 0.25, by = b.y + b.vy * 0.25;
-      if (!b.owner && lk && lk.type === 'pass' && lk.rx != null) { bx = lk.rx; by = lk.ry; } // judge against the receiving spot
+      if (!b.owner && lk && (lk.type === 'pass' || lk.type === 'clear') && lk.rx != null) { bx = lk.rx; by = lk.ry; } // judge against the receiving spot
       const best = this.bestDefender(bx, by);
       if (!best || best === c) return;
       const cc = c && !c.isGK ? this.defendCost(c, bx, by) : 1e9;
@@ -853,6 +978,12 @@
       this.looseBallAssist();
       this.handleUser(dt, I);
       PP.AI.update(this, dt);
+      const ctl = this.controlled;
+      if (this.defNudge && ctl && ctl.userAuto) { // your input bends the assisted run
+        const sp = ctl.topSpeed(true), n = this.defNudge;
+        const vx = ctl.dvx + n.x * sp * 0.7, vy = ctl.dvy + n.y * sp * 0.7, l = Math.hypot(vx, vy) || 1;
+        ctl.dvx = (vx / l) * Math.min(sp, l); ctl.dvy = (vy / l) * Math.min(sp, l);
+      }
       this.updateLunges(dt);
       this.bodyChecks();
       for (const p of this.players) p.physics(dt);
@@ -971,7 +1102,7 @@
       for (const t of this.teams) if (this.keeperContact(t.gk)) return;
 
       const bspd = Math.hypot(b.vx, b.vy), lk1 = b.lastKick;
-      let best = null, bd = 1e9;
+      let best = null, bd = 1e9, stretch = null;
       for (const p of this.players) {
         // Slow balls are easier to reach; a firm pass is only easy for the player it's meant for.
         // Team-mates of the passer are expecting it too; opponents have to read it.
@@ -979,9 +1110,20 @@
         if (p.isDown() || p.kickCd > 0) continue;
         const lk0 = b.lastKick;
         if (p.isGK && PP.AI.inBox(p.team, p.x, p.y, 0.5) && !(lk0 && lk0.team === p.team)) continue;
+        if (lk0 && lk0.type === 'pass' && lk0.team === p.team && lk0.target && lk0.target !== p && !lk0.target.isDown() &&
+            bspd > 8 && this.time - lk0.t < 3) continue; // dummy: it's for the man behind
         if (b.z > 1.9 || (b.z > 0.4 && b.vz > 0)) continue; // can't control a rising ball
         const d = U.dist(p.x, p.y, b.x, b.y);
         if (d < reach && d < bd) { bd = d; best = p; }
+        else if (!best && d < reach + 0.6 && (p.receiving || (lk1 && lk1.team === p.team) || bspd < 6)) stretch = stretch && stretch.d < d ? stretch : { p, d };
+      }
+      if (!best && stretch && b.z < 1.0) {
+        // Stretch for it: less certain, and it costs you your stride.
+        const p = stretch.p;
+        p.vx *= 0.35; p.vy *= 0.35; p.kickAnim = 0.22;
+        if (Math.random() < 0.7) { this.gainPossession(p); p.settleUntil = Math.max(p.settleUntil, this.time + 0.3); }
+        else { p.kickCd = 0.3; const dd = U.rot(b.vx, b.vy, U.rand(-0.5, 0.5)); b.vx = dd.x * 0.6; b.vy = dd.y * 0.6; b.lastTouch = p; }
+        return;
       }
       if (!best) return;
       const aiPlayer = this.autoplay || best !== this.controlled;
@@ -996,9 +1138,10 @@
       const touch = best.stats.firstTouch / 100;
       const lk = b.lastKick;
       const meant = lk && lk.target === best;            // the intended receiver is ready for it
-      const thr = (meant ? 16 : 12) + touch * (meant ? 8 : 6);
+      const cpu = !best.team.isUser;
+      const thr = (meant ? (cpu ? 15 : 19) : 12) + touch * (meant ? (cpu ? 8 : 10) : 6);
       let ch = speed < thr ? 1 : U.clamp(1 - (speed - thr) / 20, 0.2, 1);
-      if (b.z > 1.2) ch *= 0.93;
+      if (b.z > 1.2) ch *= cpu ? 0.75 : 0.93; // CPU players fluff more high balls
       if (Math.random() < ch) this.gainPossession(best);
       else {
         const d = U.rot(b.vx, b.vy, U.rand(-1.2, 1.2));
@@ -1232,6 +1375,13 @@
     const across = Math.abs((p.fx * vy - p.fy * vx) / s);  // |sin| of angle between facing and pass
     const sign = p.foot === 'L' ? -1 : 1;
     return sign * s * (lofted ? 0.16 : 0.1) * (0.6 + 0.4 * across);
+  };
+  // Which skill a pass uses: keepers kick with 'kicking', wide lofted balls in the final third
+  // are crosses, otherwise short/long passing.
+  Match.passSkill = (p, lofted) => {
+    if (p.isGK) return p.stats.kicking;
+    if (lofted && p.team.depth(p.x) > 0.65 && (p.y < 14 || p.y > C.H - 14)) return p.stats.crossing;
+    return lofted ? p.stats.longPass : p.stats.shortPass;
   };
   Match.PHASES_PER_HALF = 7;
   Match.CPU_ERR = 1.4; // CPU passing/shooting error multiplier (difficulty)

@@ -112,7 +112,9 @@
         return;
       }
 
-      const acc = 7 + this.stats.acceleration * 0.12;
+      let acc = 7 + this.stats.acceleration * 0.12;
+      const vs = Math.hypot(this.vx, this.vy), ds = Math.hypot(this.dvx, this.dvy);
+      if (vs > 2 && ds > 1 && (this.vx * this.dvx + this.vy * this.dvy) / (vs * ds) < 0.5) acc *= 0.55 + this.stats.agility * 0.005; // turning
       // Stamina: sprinting drains it, jogging/standing recovers it; fitter players last longer.
       const spd = Math.hypot(this.vx, this.vy), jog = 2.3 + this.stats.pace * 0.036;
       if (spd > jog * 1.05) this.energy = Math.max(0, this.energy - dt * 0.05 * (1.5 - this.stats.stamina / 100));
@@ -125,7 +127,7 @@
 
       const s = Math.hypot(this.vx, this.vy);
       if (s > 0.4) { this.fx = this.vx / s; this.fy = this.vy / s; }
-      this.anim += s * dt * 1.25;
+      this.anim += s * dt * 1.5; // 6-frame cycle: ~1.5 strides per second at a sprint
       this.clampToWorld();
     }
 
