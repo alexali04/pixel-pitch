@@ -281,7 +281,7 @@
         const side = opp.gk.y < gy ? 1 : -1;
         return {
           kind: 'shoot',
-          aim: side * U.rand(0.5, 0.95),
+          aim: side * U.rand(0.65, 1.05),
           power: U.clamp(0.4 + dG / 40 + U.rand(-0.1, 0.15), 0.35, 0.95),
         };
       }
@@ -352,13 +352,21 @@
       if ((gx - b.x) * b.vx > 0 && sp > 7) {
         const tl = (gx - b.x) / b.vx;
         const yl = b.y + b.vy * tl;
-        if (tl > 0 && tl < 2.5 && Math.abs(yl - gy) < C.GOAL_W / 2 + 1.5) {
+        const zl = b.z + b.vz * tl - 0.5 * C.G * tl * tl;   // height as it reaches the line
+        const onTarget = Math.abs(yl - gy) < C.GOAL_W / 2 + 0.6 && zl < C.GOAL_H + 0.4;
+        if (tl > 0 && tl < 2.5 && onTarget) {
+          // Reaction time before the keeper moves at all.
+          if (m.time - b.lastKick.t < 0.14) { gk.stop(); return; }
           const tk = Math.max(0, (gk.x - b.x) / b.vx);
           const yk = b.y + b.vy * tk;
+          const zk = U.clamp(b.z + b.vz * tk - 0.5 * C.G * tk * tk, 0, 2);
           const dy = yk - gk.y;
-          if (Math.abs(dy) > 1.0 && tk < 0.55 && tk > 0.04) {
-            const v = Math.min(Math.abs(dy) / Math.max(tk, 0.12) + 1, 4.5 + gk.stats.diving * 0.05);
-            gk.dive = 0.65;
+          const need = Math.abs(dy) - 0.7;               // what his standing reach can't cover
+          const vmax = 5.5 + gk.stats.diving * 0.04;     // ~8.5 m/s
+          // Dive only at the last moment that still gets him there, timed to meet the ball.
+          if (need > 0.25 && tk > 0.03 && tk <= need / vmax + 0.08) {
+            const v = Math.min(vmax, need / Math.max(tk, 0.08));
+            gk.dive = tk + 0.4; gk.diveTotal = gk.dive; gk.diveHold = tk; gk.diveZ = zk; gk.smother = null;
             gk.vx = 0; gk.vy = Math.sign(dy) * v;
             gk.fx = 0; gk.fy = Math.sign(dy);
             return;
@@ -379,10 +387,32 @@
       if (first) { gk.steer(it.x, it.y, true, 0.3); return; }
     }
 
-    // Opponent running at goal inside the box: narrow the angle and try to smother.
+    // Opponent running at goal.
     if (b.owner && b.owner.team !== team && m.state === 'play') {
       const c = b.owner;
       const dc = U.dist(c.x, c.y, gx, gy);
+      // 1v1: no outfield team-mate between the carrier and our goal -> rush them and go down
+      // at their feet (a smother in the box, a tackle outside it).
+      const cd = team.depth(c.x);
+      let covered = false;
+      for (const q of team.players) {
+        if (q.isGK || q.isDown()) continue;
+        if (team.depth(q.x) < cd - 0.005 && U.segPoint(q.x, q.y, c.x, c.y, gx, gy).d < 4) { covered = true; break; }
+      }
+      if (!covered && dc < 24) {
+        gk.steer(c.x + c.vx * 0.3, c.y + c.vy * 0.3, true, 0.3);
+        const dd = U.dist(gk.x, gk.y, c.x, c.y);
+        if (dd < 2.4 && gk.tackleCd <= 0 && m.time > b.protectUntil) {
+          gk.tackleCd = 1.2;
+          if (AI.inBox(team, gk.x, gk.y, 0)) {
+            const n = U.norm(c.x - gk.x, c.y - gk.y);
+            gk.dive = 0.5; gk.diveTotal = 0.5; gk.diveHold = 0.25; gk.diveZ = 0;
+            gk.vx = n.x * 7; gk.vy = n.y * 7; gk.fx = n.x; gk.fy = n.y;
+            gk.smother = c; gk.smotherHit = false;
+          } else m.startLunge(gk, c, 0.18, 9);
+        }
+        return;
+      }
       if (dc < 16 && AI.inBox(team, c.x, c.y, 0)) {
         const n = U.norm(c.x - gx, c.y - gy);
         const r = U.clamp(dc - 2.5, 1, 8);

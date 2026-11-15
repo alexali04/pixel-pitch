@@ -33,7 +33,7 @@
       <span class="h">Attack</span><span><kbd>J</kbd> pass &nbsp;<kbd>K</kbd> lofted</span><span><kbd>Space</kbd> shoot</span>
       <span class="h">Strength</span><span>hold the button</span><span>tap = soft, hold = bullet</span>
       <span class="h">Defend</span><span><kbd>J</kbd> switch &nbsp;<kbd>K</kbd> slide</span><span><kbd>Space</kbd> tackle</span>
-      <span class="h">Game</span><span><kbd>P</kbd> pause &nbsp;<kbd>R</kbd> restart</span><span>aim with direction keys</span>
+      <span class="h">Game</span><span><kbd>P</kbd> pause &nbsp;<kbd>R</kbd> restart &nbsp;<kbd>M</kbd> mute</span><span>aim with direction keys</span>
     </div>`;
 
   function show(html, onClick) {
@@ -47,6 +47,7 @@
   function titleScreen() {
     screen = 'title';
     match = null;
+    PP.Sound.crowdOff();
     hud.hidden = true;
     const [h, a] = PP.TEAM_DEFS;
     PP.ensureSquad(h); PP.ensureSquad(a);
@@ -70,7 +71,7 @@
 
   function startMatch() {
     const [h, a] = PP.TEAM_DEFS;
-    match = new PP.Match(h, a, { fullCourt: settings.fullCourt });
+    match = new PP.Match(h, a, { fullCourt: settings.fullCourt, sound: true });
     PP.match = match; // handy for debugging in the console
     $('homeName').textContent = h.short;
     $('awayName').textContent = a.short;
@@ -135,6 +136,7 @@
     last = now;
 
     if (I.hit('restart') && screen !== 'title') { I.endStep(); startMatch(); }
+    if (I.hit('mute')) { I.endStep(); const muted = PP.Sound.toggleMute(); if (match) match.say(muted ? 'Sound off' : 'Sound on', 0.8); }
     if (screen === 'title' && I.hit('fullcourt')) { I.endStep(); setFullCourt(!settings.fullCourt); titleScreen(); }
     if (screen === 'match') {
       if (I.hit('pause')) { I.endStep(); pause(); }

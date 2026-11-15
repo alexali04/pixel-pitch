@@ -71,9 +71,14 @@
     physics(dt) {
       this.kickCd = Math.max(0, this.kickCd - dt);
       this.tackleCd = Math.max(0, this.tackleCd - dt);
+      if (this.kickAnim > 0) this.kickAnim -= dt;
+      if (this.jump > 0) this.jump -= dt;
 
       if (this.slide > 0 || this.dive > 0) {
-        const f = Math.exp(-(this.dive > 0 ? 1.5 : 2.6) * dt);
+        // A dive keeps its speed until the moment it was timed to meet the ball, then dies.
+        let k = 2.6;
+        if (this.dive > 0) { this.diveHold = (this.diveHold || 0) - dt; k = this.diveHold > 0 ? 0 : 7; }
+        const f = Math.exp(-k * dt);
         this.vx *= f; this.vy *= f;
         this.x += this.vx * dt; this.y += this.vy * dt;
         if (this.slide > 0) { this.slide -= dt; if (this.slide <= 0) { this.slide = 0; this.stun = 0.45; } }
@@ -110,7 +115,7 @@
 
       const s = Math.hypot(this.vx, this.vy);
       if (s > 0.4) { this.fx = this.vx / s; this.fy = this.vy / s; }
-      this.anim += s * dt * 1.6;
+      this.anim += s * dt * 1.25;
       this.clampToWorld();
     }
 

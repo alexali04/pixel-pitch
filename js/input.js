@@ -12,6 +12,7 @@
     pause: ['KeyP', 'Escape'],
     restart: ['KeyR'],
     fullcourt: ['KeyF'],
+    mute: ['KeyM'],
   };
   const GAME_KEYS = new Set(Object.values(BIND).flat());
 

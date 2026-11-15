@@ -32,6 +32,7 @@
       // Full court = continuous 11v11 with defending. Off = you only play your attacking
       // phases; the CPU's attacks are resolved offscreen from team ratings.
       this.fullCourt = !!opts.fullCourt;
+      this.sound = !!opts.sound;        // only the live match makes noise, not headless sims
       this.ratings = [PP.teamRatings(this.home.def), PP.teamRatings(this.away.def)];
       this.phase = null;
       this.phaseInHalf = 0;
@@ -42,6 +43,7 @@
     other(t) { return t === this.home ? this.away : this.home; }
     idx(t) { return t === this.home ? 0 : 1; }
     say(text, t = 1.4) { this.banner = { text, t }; }
+    sfx(name, arg) { if (this.sound && !this.autoplay && PP.Sound) PP.Sound.play(name, arg); }
     pop(p, text, color = '#ffffff') { this.popups.push({ x: p.x, y: p.y, text, color, t: 0.9 }); }
     get minute() { return Math.floor(this.clock / 60); }
 
@@ -64,6 +66,7 @@
       const behind = (t.depth(p.x) - t.depth(bx)) * C.W; // metres past the ball towards their goal
       if (behind > -0.5) cost += 6 + Math.max(0, behind) * 0.8;
       if (p.isDown()) cost += 20;
+      cost += { CB: -3, DM: -1.5, LB: 0, RB: 0 }[p.role] ?? 1;   // prefer the middle of the defence
       return cost;
     }
 
@@ -132,6 +135,7 @@
       // teleports: don't interpolate across them
       for (const q of this.players) { q.ox = q.x; q.oy = q.y; }
       b.ox = b.x; b.oy = b.y; b.oz = b.z;
+      if (kind !== 'gk') this.sfx('whistle', 1);
       const names = { throw: 'Throw-in', corner: 'Corner', goalkick: 'Goal kick' };
       if (names[kind]) this.say(names[kind], 1.1);
     }
@@ -159,6 +163,11 @@
       b.lastTouch = p;
       b.lastKick = { type, by: p, team: p.team, target, t: this.time };
       p.kickCd = 0.35;
+      p.kickAnim = 0.18;
+      const sp = Math.hypot(b.vx, b.vy);
+      if (type === 'shot') this.sfx('shot', U.clamp((sp - 14) / 19, 0, 1));
+      else if (b.vz > 0.5) this.sfx('chip', U.clamp(sp / 20, 0, 1));
+      else this.sfx('pass', U.clamp((sp - 6) / 15, 0, 1));
       this.endRestart();
       for (const q of this.players) q.receiving = null;
       if (target) target.receiving = { t: this.time };
@@ -211,14 +220,16 @@
 
     // What a user pass along unit direction (nx, ny) would do: launch velocity, predicted
     // path, where it ends up, and which teammate gets there first (they run onto it).
-    passPlan(p, nx, ny, lofted, power) {
+    passPlan(p, nx, ny, lofted, power, vOverride = null) {
       const b = this.ball;
       let vx, vy, vz;
       if (!lofted) {
-        const v0 = Match.userGroundSpeed(power);
+        let v0 = vOverride ?? Match.userGroundSpeed(power);
+        if (p.isGK) v0 = Math.max(v0, 13);              // keepers play it firmer
         vx = nx * v0; vy = ny * v0; vz = 0;
       } else {
-        const D = 3 + power * 47, T = 0.45 + D / 22;   // tap: ~3m dink; full: ~50m
+        // A chip always rises in a clear arc; holding longer sends it further and higher.
+        const D = p.isGK ? 20 + power * 35 : 7 + power * 38, T = 0.75 + D / 20;
         const s = (D * 0.8 * C.AIR_K) / (1 - Math.exp(-C.AIR_K * T));
         vx = nx * s; vy = ny * s; vz = (C.G * T) / 2;
       }
@@ -247,6 +258,11 @@
         }
       }
       if (!target) target = this.nearestUser(end.x, end.y, p);
+      // Back-pass to our keeper: make sure it actually gets to him.
+      if (target && target.isGK && !lofted && vOverride == null) {
+        const vreq = Ball.groundSpeedFor(U.dist(b.x, b.y, target.x, target.y), 5);
+        if (Math.hypot(vx, vy) < vreq) return this.passPlan(p, nx, ny, false, power, vreq);
+      }
       return { vx, vy, vz, lofted, x: end.x, y: end.y, target };
     }
 
@@ -254,16 +270,16 @@
     shoot(p, aimY, power) {
       const b = this.ball, team = p.team;
       const gx = team.attackX;
-      const ty = C.H / 2 + U.clamp(aimY, -1, 1) * 3.0;
+      const ty = C.H / 2 + U.clamp(aimY, -1, 1) * 3.2;
       const D = U.dist(b.x, b.y, gx, ty);
       const pressure = this.pressureOn(p);
       const fin = p.stats.finishing / 100, pow = p.stats.shotPower / 100;
       power = U.clamp(power, 0.15, 1);
-      const speed = 14 + 12 * power + 7 * pow * power;
-      const angErr = (0.02 + D * 0.0011 + power * power * 0.03 + pressure * 0.04) * (1.5 - fin);
+      const speed = 19 + 9 * power + 6 * pow * power;   // tap ~20 m/s, full wind-up ~32 m/s
+      const angErr = (0.035 + D * 0.002 + power * power * 0.06 + pressure * 0.07) * (1.6 - fin);
       const dir = U.rot((gx - b.x) / D, (ty - b.y) / D, U.gauss() * angErr);
       const t = D / speed;
-      const h = Math.max(0.1, 0.35 + power * 1.25 + U.gauss() * (0.25 + power * 0.55 + pressure * 0.3) * (1.4 - fin));
+      const h = Math.max(0.1, 0.35 + power * 1.25 + U.gauss() * (0.35 + power * 0.8 + pressure * 0.5) * (1.5 - fin));
       b.vx = dir.x * speed; b.vy = dir.y * speed;
       b.vz = h / t + (C.G * t) / 2;
       b.z = 0.05;
@@ -303,6 +319,7 @@
       const userLost = c.team.isUser, userWon = t.team.isUser;
       if (Math.random() < ch) {
         c.stun = 0.5; c.kickCd = 0.5;
+        this.sfx('tackle');
         this.pop(c, 'TACKLED!', userLost ? '#e4572e' : '#ffd23f');
         if (!slide && Math.random() < 0.55) { this.gainPossession(t); return; }
         b.owner = null;
@@ -315,6 +332,7 @@
       } else {
         if (!slide) t.stun = 0.4;
         c.protectFlash = this.time;
+        this.sfx('bump');
         this.pop(c, 'HELD OFF', userWon ? '#e4572e' : '#a8e6a1');
       }
     }
@@ -378,6 +396,7 @@
       if (U.dist(p.x, p.y, tx, ty) < 5 && n.x * p.fx + n.y * p.fy > 0.2) { p.fx = n.x; p.fy = n.y; }
       p.slide = 0.5; p.slideHit = false;
       p.vx = p.fx * 8.5; p.vy = p.fy * 8.5;
+      this.sfx('slide');
     }
 
     handleUser(dt, I) {
@@ -408,7 +427,8 @@
         // Hold a button to charge strength, release to play it. Tap = soft.
         const restart = this.state === 'restart';
         if (!this.charging) {
-          const kind = I.hit('pass') ? 'pass' : I.hit('lob') ? 'lob' : I.hit('shoot') ? (restart ? 'lob' : 'shot') : null;
+          const setPiece = restart && this.restart && this.restart.kind !== 'phase';
+          const kind = I.hit('pass') ? 'pass' : I.hit('lob') ? 'lob' : I.hit('shoot') ? (setPiece ? 'lob' : 'shot') : null;
           if (kind) {
             this.charging = true; this.chargeKind = kind; this.charge = 0;
             this.chargeBtn = I.hit('shoot') ? 'shoot' : kind;
@@ -442,9 +462,21 @@
         if (restart && !this.charging && this.restart && this.restart.t > 7) PP.AI.restartKick(this, p, this.restart);
       } else {
         this.charging = false; this.charge = 0; this.chargeKind = null; this.preview = null;
-        if (I.hit('pass')) this.switchPlayer();
-        else if (I.hit('shoot')) this.tryTackle(p);
-        else if (I.hit('lob')) this.trySlide(p);
+        // Ball in the air near you: J = header pass (if it's our ball), Space = header at goal
+        // or clearance. Ball loose on the floor: Space = sprint to intercept it.
+        const aerial = this.aerialFor(p);
+        const ours = !b.owner && b.lastKick && b.lastKick.team === p.team;
+        if (I.hit('pass')) {
+          if (aerial && ours) this.queueHeader(p, 'pass', ax);
+          else this.switchPlayer();
+        } else if (I.hit('shoot')) {
+          if (aerial) {
+            const d = p.team.depth(b.x);
+            this.queueHeader(p, d > 0.68 ? 'shoot' : d < 0.4 && !ours ? 'clear' : 'pass', ax);
+          }
+          else if (b.owner && b.owner.team !== p.team) this.tryTackle(p);
+          else if (!b.owner) { p.receiving = { t: this.time }; this.pop(p, 'GO!', '#9fd3c7'); }
+        } else if (I.hit('lob')) this.trySlide(p);
         // Auto-poke: get close enough and your defender has a go on their own.
         const c = b.owner;
         if (c && c.team !== p.team && this.state === 'play' && p.lunge <= 0 && !p.isDown() &&
@@ -453,6 +485,60 @@
           p.tackleCd = 0.9;
         }
       }
+    }
+
+    // Is a loose ball going to be in heading range of p soon?
+    aerialFor(p) {
+      const b = this.ball, path = this.ballPath;
+      if (b.owner || !path || (b.z < 0.6 && b.vz <= 1)) return false;
+      const sp = p.topSpeed(true);
+      for (let i = 0; i < 10; i++) {
+        const q = path[i];
+        if (q.z < 0.7 || q.z > 2.8) continue;
+        if (U.dist(p.x, p.y, q.x, q.y) < 1.4 + (i + 1) * 0.1 * sp) return true;
+      }
+      return false;
+    }
+
+    // Headers are buffered: press a little early and it fires when the ball arrives.
+    queueHeader(p, kind, ax) {
+      this.headQ = { p, kind, t: this.time, aim: ax.x || ax.y ? U.norm(ax.x, ax.y) : { x: p.fx, y: p.fy }, aimY: ax.y };
+      p.receiving = { t: this.time }; // run to meet it
+    }
+
+    tryHeader() {
+      const q = this.headQ, b = this.ball;
+      if (!q) return;
+      if (b.owner || this.time - q.t > 0.8 || q.p !== this.controlled) { this.headQ = null; return; }
+      const p = q.p;
+      if (p.isDown() || U.dist(p.x, p.y, b.x, b.y) > 1.5 || b.z < 0.5 || b.z > 2.9) return;
+      this.headQ = null;
+      this.doHeader(p, q.kind, q.aim, q.aimY);
+    }
+
+    doHeader(p, kind, aim, aimY = 0) {
+      const b = this.ball, team = p.team, hs = p.stats.heading / 100;
+      let vx, vy, vz;
+      if (kind === 'shoot') {
+        const gx = team.attackX, ty = C.H / 2 + U.clamp(aimY, -1, 1) * 3.0;
+        const D = Math.max(1, U.dist(b.x, b.y, gx, ty));
+        const d = U.rot((gx - b.x) / D, (ty - b.y) / D, U.gauss() * (0.06 + (1 - hs) * 0.12));
+        const sp = 12 + hs * 8, t = D / sp;
+        const h = U.clamp(0.6 + U.gauss() * (0.5 + (1 - hs)), 0, 3.2);
+        vx = d.x * sp; vy = d.y * sp; vz = (h - b.z) / t + (C.G * t) / 2;
+        this.stats.shots[this.idx(team)]++;
+      } else if (kind === 'pass') {
+        const sp = 9 + hs * 4;
+        vx = aim.x * sp; vy = aim.y * sp; vz = 2.5;
+      } else { // clear: up and away from our goal
+        const d = U.norm(team.dir * 1.5, (b.y - C.H / 2) * 0.03 + aim.y * 0.6);
+        const sp = 10 + hs * 4;
+        vx = d.x * sp; vy = d.y * sp; vz = 4 + hs * 1.5;
+      }
+      b.vx = vx; b.vy = vy; b.vz = vz;
+      this.release(p, kind === 'shoot' ? 'shot' : 'pass', null);
+      p.kickAnim = 0; p.jump = 0.35;
+      this.pop(p, 'HEADER', '#ffffff');
     }
 
     // When defending, hand control straight to the best-placed goal-side defender.
@@ -537,7 +623,7 @@
         this.stateT -= dt;
         for (const p of this.players) { p.stop(); p.physics(dt); }
         if (this.stateT <= 0) {
-          if (this.clock >= this.half * 45 * 60) this.state = this.half === 1 ? 'halftime' : 'fulltime';
+          if (this.clock >= this.half * 45 * 60) { this.state = this.half === 1 ? 'halftime' : 'fulltime'; this.sfx('whistle', 3); }
           else this.startPhase();
         }
         return;
@@ -570,6 +656,7 @@
       this.updateBall(dt);
       if (this.state === 'play') {
         this.slideContacts();
+        this.tryHeader();
         this.contacts();
         this.bounds();
       }
@@ -613,6 +700,24 @@
 
     slideContacts() {
       const b = this.ball;
+      // Keeper smothering at a forward's feet.
+      for (const t of this.teams) {
+        const gk = t.gk;
+        if (!(gk.dive > 0 && gk.smother && !gk.smotherHit)) continue;
+        if (U.dist(gk.x, gk.y, b.x, b.y) > 1.4 || b.z > 0.8) continue;
+        gk.smotherHit = true;
+        const c = b.owner;
+        const beat = c && c.team !== t ? (c.stats.dribbling - 70) * 0.01 : -0.3;
+        if (Math.random() < U.clamp(0.6 + (gk.stats.gkPositioning - 70) * 0.01 - beat, 0.2, 0.9)) {
+          if (c) c.stun = 0.4;
+          this.sfx('save');
+          this.pop(gk, 'SMOTHERED!', t.isUser ? '#ffd23f' : '#e4572e');
+          gk.dive = 0; gk.smother = null;
+          this.gkHold(gk);
+          return;
+        }
+        if (c) this.pop(c, 'ROUNDED HIM!', c.team.isUser ? '#ffd23f' : '#e4572e');
+      }
       for (const p of this.players) {
         if (p.slide <= 0 || p.slideHit) continue;
         if (U.dist(p.x + p.fx * 0.5, p.y + p.fy * 0.5, b.x, b.y) > 1.1 || b.z > 0.6) continue;
@@ -642,6 +747,14 @@
         if (d < bd) { bd = d; best = p; }
       }
       if (!best) return;
+      const aiPlayer = this.autoplay || best !== this.controlled;
+      if (b.z > 1.1 && aiPlayer) {
+        const lk1 = b.lastKick, d = best.team.depth(b.x);
+        if (d < 0.3 && lk1 && lk1.team !== best.team) { this.doHeader(best, 'clear', { x: best.team.dir, y: 0 }); return; }
+        if (d > 0.84 && lk1 && lk1.team === best.team && Math.abs(b.y - C.H / 2) < 12) {
+          this.doHeader(best, 'shoot', null, (Math.random() < 0.5 ? -1 : 1) * U.rand(0.4, 0.95)); return;
+        }
+      }
       const speed = Math.hypot(b.vx, b.vy) + Math.abs(b.vz) * 0.3;
       const touch = best.stats.firstTouch / 100;
       const lk = b.lastKick;
@@ -662,7 +775,7 @@
       const b = this.ball, team = gk.team;
       if (gk.kickCd > 0 || gk.stun > 0) return false;
       if (!PP.AI.inBox(team, b.x, b.y, 0.3)) return false;
-      const reach = gk.dive > 0 ? 1.9 : 1.1;
+      const reach = gk.dive > 0 ? 2.1 : 1.2;
       const d = U.dist(gk.x, gk.y, b.x, b.y);
       if (d > reach || b.z > 2.6) return false;
       const speed = Math.hypot(b.vx, b.vy);
@@ -671,12 +784,13 @@
       const threat = lk && lk.team !== team && speed > 10;
       if (!threat) { this.gkHold(gk); return true; }
 
-      let save = 0.92 - Math.max(0, speed - 20) * 0.025 - (d / reach) * 0.3 + (gk.stats.reflexes - 70) * 0.006;
+      let save = 0.95 - Math.max(0, speed - 22) * 0.02 - (d / reach) * 0.25 + (gk.stats.reflexes - 70) * 0.006;
       if (b.z > 2.0) save -= 0.15;
       save = U.clamp(save, 0.2, 0.97);
       if (lk.type === 'shot' && !lk.counted) { lk.counted = true; this.stats.onTarget[this.idx(lk.team)]++; }
       if (Math.random() < save) {
         const catchP = U.clamp(1.25 - speed / 22 + (gk.stats.handling - 70) * 0.01 - (gk.dive > 0 ? 0.2 : 0), 0.1, 0.9);
+        this.sfx('save');
         if (Math.random() < catchP) { this.gkHold(gk); this.say('Save!', 1); }
         else {
           b.vx = team.dir * U.rand(4, 9);
@@ -699,16 +813,17 @@
         const off = Math.abs(b.y - C.H / 2);
         if (Math.abs(off - C.GOAL_W / 2) < 0.2 && b.z < C.GOAL_H) {
           b.x = side === 0 ? 0.05 : C.W - 0.05; b.vx = -b.vx * 0.6; b.vy += U.rand(-2, 2);
-          b.owner = null; this.say('Post!', 1); return;
+          b.owner = null; this.say('Post!', 1); this.sfx('post'); return;
         }
         if (off < C.GOAL_W / 2 && Math.abs(b.z - C.GOAL_H) < 0.15) {
           b.x = side === 0 ? 0.05 : C.W - 0.05; b.vx = -b.vx * 0.5; b.vz = -Math.abs(b.vz) * 0.5;
-          b.owner = null; this.say('Crossbar!', 1); return;
+          b.owner = null; this.say('Crossbar!', 1); this.sfx('post'); return;
         }
         const attacking = this.teams.find((t) => t.attackX === side);
         const defending = this.other(attacking);
         if (off < C.GOAL_W / 2 && b.z < C.GOAL_H) { this.goalScored(attacking); return; }
         const lt = b.lastTouch;
+        if (b.lastKick && b.lastKick.type === 'shot' && b.lastKick.team === attacking) this.sfx('ooh');
         if (lt && lt.team === defending) {
           const taker = this.cornerTaker(attacking, b.y < C.H / 2 ? 0 : C.H);
           this.restartOrEnd('corner', attacking, taker, side === 0 ? 0.4 : C.W - 0.4, b.y < C.H / 2 ? 0.4 : C.H - 0.4);
@@ -799,6 +914,7 @@
         this.stats.shots[1]++; this.stats.onTarget[1]++;
         this.events.push({ type: 'goal', team: 1, minute, scorer: scorer.name, og: false, offscreen: true });
         text = `${away.short} score! ${scorer.name} ${minute}'`;
+        this.sfx('distantRoar');
       } else if (reason === 'turnover' && Math.random() < 0.6) {
         this.stats.shots[1]++;
         text = `${away.short} attack... ` + U.pick([`saved by ${this.home.gk.name}`, 'shot wide', 'you win it back', 'cleared']);
@@ -829,6 +945,7 @@
       this.ball.owner = null;
       this.charging = false;
       this.say(og ? 'Own goal!' : 'GOAL!', 2.4);
+      this.sfx('goal');
     }
 
     keepBallInNet() {
@@ -848,6 +965,7 @@
       if (this.clock >= end) {
         this.clock = end;
         this.state = this.half === 1 ? 'halftime' : 'fulltime';
+        this.sfx('whistle', 3);
         this.charging = false;
       }
     }
@@ -862,8 +980,8 @@
   }
 
   // Ground passes arrive firm: longer passes arrive faster.
-  // User ground passes: tap = 6 m/s (a nudge, ~6m), full = 32 m/s (a rocket).
-  Match.userGroundSpeed = (power) => 6 + U.clamp(power, 0, 1) * 26;
+  // User ground passes: tap = 10 m/s (rolls ~15m), full = 21 m/s (a firm ~40m ball).
+  Match.userGroundSpeed = (power) => 10 + U.clamp(power, 0, 1) * 11;
   Match.PHASES_PER_HALF = 7;
   Match.AIM_TURN = 2.6; // rad/s the pass aim rotates while a pass button is held (~150 deg/s)
   // CPU attack vs your defence (and midfield control) -> multiplier on offscreen goal chances.

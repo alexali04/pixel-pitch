@@ -1,31 +1,40 @@
 (function () {
   const C = PP.C, U = PP.U;
   const PX = C.PX, PY = C.PY, PZ = C.PZ, VW = C.VIEW_W, VH = C.VIEW_H, M = C.MARGIN;
+  // Perspective: the camera sits in the stands on the near touchline, so the far side of the
+  // pitch is smaller than the near side. Lines running up the pitch (goal lines, box edges)
+  // lean towards a vanishing point, which shows the goal mouths at an angle.
+  const PERSP = 0.007;   // fractional scale change per metre of depth
+  const TY = 4;          // pitch texture rows per metre (<= on-screen rows per metre, so no row is skipped)
 
-  // 10x17 player sprite, facing right (mirrored for left).
+  // 10x17 player sprites, facing right (mirrored for left). Built from a top (head+torso,
+  // 11 rows), shorts (2 rows) and legs (4 rows).
   // H hair, S skin, s skin shade, E eye, T shirt, t shirt shade, P shorts, K socks, B boots.
-  const UPPER = [
-    '...HHH....',
-    '..HHHHH...',
-    '..HHSSS...',
-    '..HSSES...',
-    '...sSSS...',
-    '..tTTTT...',
-    '.ttTTTTT..',
-    '.tTTTTTT..',
-    '.STTTTTS..',
-    '.S.TTT.S..',
-    '..TTTTT...',
-    '..PPPPP...',
-    '..PP.PP...',
-  ];
-  const LEGS = {
-    stand:   ['..SS.SS...', '..KK.KK...', '..KK.KK...', '..BB.BB...'],
-    strideA: ['.SS...SS..', '.KK...KK..', '.KK....KK.', 'BB.....BB.'],
-    strideB: ['..SS..SS..', '.KK...KK..', '.KK...KK..', '.BB....BB.'],
-    lunge:   ['..SS.SS...', '..KK..KK..', '..KK...KK.', '..BB....BB'], // leg stuck out to tackle
+  const HEAD = ['...HHH....', '..HHHHH...', '..HHSSS...', '..HSSES...', '...sSSS...'];
+  const HEAD_LEAN = HEAD.map((r) => '.' + r.slice(0, 9)); // head forward when running
+  const TORSO = {
+    idle: ['..tTTTT...', '.ttTTTTT..', '.tTTTTTT..', '.STTTTTS..', '.S.TTT.S..', '..TTTTT...'],
+    armA: ['..tTTTT...', '.ttTTTTTT.', '.tTTTTTTS.', 'StTTTTT...', 'S.TTTTT...', '..TTTTT...'], // near arm forward
+    armB: ['..tTTTT...', 'tttTTTTT..', 'S.TTTTTT..', '.tTTTTTS..', '..TTTTTS..', '..TTTTT...'], // near arm back
+    armsUp: ['S.tTTTT.S.', 'StTTTTTTS.', '.tTTTTTT..', '.tTTTTTT..', '..TTTTT...', '..TTTTT...'], // jumping to head it
   };
-  const RUN = ['strideA', 'stand', 'strideB', 'stand'];
+  const SHORTS = { idle: ['..PPPPP...', '..PP.PP...'], wide: ['..PPPPP...', '.PPP.PPP..'], knee: ['..PPPPP...', '..PP.PPP..'] };
+  const LEGS = {
+    stand:  ['..SS.SS...', '..KK.KK...', '..KK.KK...', '..BB.BB...'],
+    stride: ['.SS...SS..', '.KK....KK.', 'KK......KK', 'BB......BB'], // both legs reaching
+    kneeUp: ['..SS..SSS.', '..KK...KK.', '..KK...BB.', '..BB......'], // front knee driving up
+    heelUp: ['.SS..SS...', 'KK...KK...', 'BB...KK...', '.....BB...'], // back heel kicking up
+    lunge:  ['..SS.SS...', '..KK..KK..', '..KK...KK.', '..BB....BB'], // leg stuck out to tackle
+    kick:   ['..SS.SSS..', '..KK...SKK', '..KK.....B', '..BB......'], // striking the ball
+  };
+  // Run cycle: stride, drive the knee (airborne, body up 1px), stride, kick the heel.
+  const RUN = [
+    { torso: 'armA', shorts: 'wide', legs: 'stride', bob: 0 },
+    { torso: 'armA', shorts: 'knee', legs: 'kneeUp', bob: -1 },
+    { torso: 'armB', shorts: 'wide', legs: 'stride', bob: 0 },
+    { torso: 'armB', shorts: 'idle', legs: 'heelUp', bob: -1 },
+  ];
+  const sprite = (head, torso, shorts, legs) => head.concat(TORSO[torso], SHORTS[shorts], LEGS[legs]);
 
   class Renderer {
     constructor(canvas) {
@@ -37,22 +46,45 @@
       this.t = 0;
     }
 
-    sx(x) { return Math.round((x - this.cam.x) * PX + VW / 2); }
-    sy(y, z = 0) { return Math.round((y - this.cam.y) * PY + VH / 2 - z * PZ); }
+    k(y) { return 1 + PERSP * (y - this.cam.y); }                 // scale at depth y
+    sx(x, y) { return Math.round((x - this.cam.x) * PX * this.k(y) + VW / 2); }
+    sy(y, z = 0) {
+      const d = y - this.cam.y;
+      return Math.round(VH / 2 + PY * (d + (PERSP * d * d) / 2) - z * PZ * this.k(y));
+    }
+    // Screen row -> world depth (inverse of sy at z = 0).
+    rowToY(row) {
+      const r = (row - VH / 2) / PY, q = 1 + 2 * PERSP * r;
+      return q <= 0 ? null : this.cam.y + (-1 + Math.sqrt(q)) / PERSP;
+    }
+
+    // Draw the flat pitch texture row by row, each row scaled for its depth.
+    drawPitch() {
+      const g = this.ctx, tex = this.pitch;
+      g.fillStyle = '#1b2230'; g.fillRect(0, 0, VW, VH);
+      for (let row = 0; row < VH; row++) {
+        const y = this.rowToY(row + 0.5);
+        if (y == null || y < -M || y > C.H + M) continue;
+        const ty = Math.floor((y + M) * TY);
+        const k = this.k(y), half = VW / 2 / (PX * k);
+        const srcX = (this.cam.x - half + M) * PX, srcW = (2 * half) * PX;
+        g.drawImage(tex, srcX, ty, srcW, 1, 0, row, VW, 1);
+      }
+    }
 
     buildPitch() {
-      const w = Math.ceil((C.W + 2 * M) * PX), h = Math.ceil((C.H + 2 * M) * PY);
+      const w = Math.ceil((C.W + 2 * M) * PX), h = Math.ceil((C.H + 2 * M) * TY);
       const cv = document.createElement('canvas');
       cv.width = w; cv.height = h;
       const g = cv.getContext('2d');
-      const X = (x) => Math.round((x + M) * PX), Y = (y) => Math.round((y + M) * PY);
+      const X = (x) => Math.round((x + M) * PX), Y = (y) => Math.round((y + M) * TY);
 
       // Stands with a pixel crowd.
       g.fillStyle = '#1b2230'; g.fillRect(0, 0, w, h);
       const crowd = ['#e4572e', '#f3a712', '#29335c', '#a8c686', '#f4f4f4', '#669bbc', '#2ec4b6', '#d7263d', '#8c6a5d', '#f0e2a3', '#3d405b'];
       for (let yy = 0; yy < h; yy += 3) {
         for (let xx = 0; xx < w; xx += 3) {
-          const wx = xx / PX - M, wy = yy / PY - M;
+          const wx = xx / PX - M, wy = yy / TY - M;
           if (wx > -6 && wx < C.W + 6 && wy > -6 && wy < C.H + 6) continue;
           if (Math.random() < 0.7) {
             g.fillStyle = U.pick(crowd); g.fillRect(xx, yy, 2, 2);
@@ -93,14 +125,14 @@
       // Lines.
       g.fillStyle = '#eef3ea';
       const hline = (x1, x2, y) => g.fillRect(X(x1), Y(y), X(x2) - X(x1) + 1, 1);
-      const vline = (x, y1, y2) => g.fillRect(X(x), Y(y1), 1, Y(y2) - Y(y1) + 1);
+      const vline = (x, y1, y2) => g.fillRect(X(x) - 1, Y(y1), 2, Y(y2) - Y(y1) + 1);
       const arc = (cx, cy, r, keep) => {
-        const steps = Math.ceil(r * PX * 7);
+        const steps = Math.ceil(r * PX * 4);
         for (let i = 0; i < steps; i++) {
           const a = (i / steps) * Math.PI * 2;
           const x = cx + Math.cos(a) * r, y = cy + Math.sin(a) * r;
           if (keep && !keep(x, y)) continue;
-          g.fillRect(X(x), Y(y), 1, 1);
+          g.fillRect(X(x), Y(y), 2, 1);
         }
       };
       hline(0, C.W, 0); hline(0, C.W, C.H); vline(0, 0, C.H); vline(C.W, 0, C.H);
@@ -127,19 +159,18 @@
     // the goal you're attacking. The whole pitch width is always in view thanks to the tilt.
     updateCamera(m, dt) {
       const b = m.ball;
-      const hw = VW / 2 / PX, hh = VH / 2 / PY;
+      const hw = VW / 2 / PX;
       const userBall = (b.owner && b.owner.team.isUser) || (!b.owner && b.lastKick && b.lastKick.team.isUser);
       const fx = b.rx + (userBall ? m.home.dir * hw * 0.2 : 0);
       const dz = hw * 0.15;
       let tx = this.cam.x;
       if (fx < tx - dz) tx = fx + dz; else if (fx > tx + dz) tx = fx - dz;
-      const ty = C.H / 2 + (b.ry - C.H / 2) * 0.15;
+      const ty = C.H / 2 + 2.5 + (b.ry - C.H / 2) * 0.1;
       const k = m.camSnap ? 1 : Math.min(1, dt * 3);
       m.camSnap = false;
       this.cam.x += (tx - this.cam.x) * k;
       this.cam.y += (ty - this.cam.y) * k;
       this.cam.x = U.clamp(this.cam.x, -M + hw + 2, C.W + M - hw - 2);
-      this.cam.y = U.clamp(this.cam.y, Math.min(C.H / 2, -M + hh), Math.max(C.H / 2, C.H + M - hh));
     }
 
     // alpha = how far we are between the last two sim steps (displays faster than 60 Hz
@@ -155,21 +186,20 @@
       lerp(m.ball);
       m.ball.rz = m.ball.oz == null ? m.ball.z : m.ball.oz + (m.ball.z - m.ball.oz) * alpha;
       this.updateCamera(m, dt);
-      g.fillStyle = '#1b2230'; g.fillRect(0, 0, VW, VH);
-      g.drawImage(this.pitch, this.sx(-M), this.sy(-M));
+      this.drawPitch();
 
       this.drawGoalBack(0); this.drawGoalBack(C.W);
 
       // Shadows.
       g.fillStyle = 'rgba(0,0,0,0.28)';
       for (const p of m.players) {
-        const x = this.sx(p.rx), y = this.sy(p.ry);
+        const x = this.sx(p.rx, p.ry), y = this.sy(p.ry);
         if (p.slide > 0 || p.dive > 0 || p.stun > 0.25) { g.fillRect(x - 7, y - 1, 15, 3); continue; }
         g.fillRect(x - 3, y - 1, 8, 3); g.fillRect(x - 4, y, 10, 1);
       }
       const b = m.ball;
       const bs = Math.max(2, 4 - Math.floor(b.rz));
-      g.fillRect(this.sx(b.rx) - 1, this.sy(b.ry), bs, 1);
+      g.fillRect(this.sx(b.rx, b.ry) - 1, this.sy(b.ry), bs, 1);
 
       // Depth-sorted sprites.
       const list = m.players.map((p) => ({ y: p.ry, p }));
@@ -192,7 +222,7 @@
       const pv = m.preview, p = m.controlled;
       if (!pv || !p || !m.charging) return;
       const g = this.ctx;
-      const x0 = this.sx(p.rx), y0 = this.sy(p.ry), x1 = this.sx(pv.x), y1 = this.sy(pv.y);
+      const x0 = this.sx(p.rx, p.ry), y0 = this.sy(p.ry), x1 = this.sx(pv.x, pv.y), y1 = this.sy(pv.y);
       const len = Math.hypot(x1 - x0, y1 - y0);
       const n = Math.max(1, Math.floor(len));
       const col = pv.lofted ? '#9fd3ff' : '#ffffff';
@@ -206,7 +236,7 @@
         g.fillRect(Math.round(x0 + (x1 - x0) * t), Math.round(y0 + (y1 - y0) * t - lift), 1, 1);
       }
       g.fillStyle = col;
-      if (pv.target) this.ring(this.sx(pv.target.rx), this.sy(pv.target.ry), col);
+      if (pv.target) this.ring(this.sx(pv.target.rx, pv.target.ry), this.sy(pv.target.ry), col);
       for (let k = -2; k <= 2; k++) { g.fillRect(x1 + k, y1 + Math.round(k / 2), 1, 1); g.fillRect(x1 + k, y1 - Math.round(k / 2), 1, 1); }
     }
 
@@ -227,7 +257,7 @@
       g.textAlign = 'center';
       g.textBaseline = 'alphabetic';
       for (const pp of m.popups) {
-        const x = this.sx(pp.x), y = this.sy(pp.y) - 27;
+        const x = this.sx(pp.x, pp.y), y = this.sy(pp.y) - 27;
         g.globalAlpha = Math.min(1, pp.t * 3);
         g.fillStyle = '#000'; g.fillText(pp.text, x + 1, y + 1);
         g.fillStyle = pp.color; g.fillText(pp.text, x, y);
@@ -235,30 +265,56 @@
       g.globalAlpha = 1;
     }
 
-    goalBox(side) {
-      const s = side === 0 ? -1 : 1;
-      const x0 = this.sx(side), x1 = this.sx(side + s * C.GOAL_D);
-      return { x0, x1, xa: Math.min(x0, x1), xb: Math.max(x0, x1), y1: this.sy(C.GOAL_Y1), y2: this.sy(C.GOAL_Y2), hp: Math.round(C.GOAL_H * PZ) };
+    // Project a world point (x, y, z) to the screen.
+    P(x, y, z = 0) { return [this.sx(x, y), this.sy(y, z)]; }
+
+    line(a, b, col, w = 1) {
+      const g = this.ctx;
+      g.fillStyle = col;
+      let [x0, y0] = a; const [x1, y1] = b;
+      const dx = Math.abs(x1 - x0), dy = -Math.abs(y1 - y0), sx = x0 < x1 ? 1 : -1, sy = y0 < y1 ? 1 : -1;
+      let err = dx + dy;
+      for (;;) {
+        g.fillRect(x0, y0, w, w);
+        if (x0 === x1 && y0 === y1) break;
+        const e2 = 2 * err;
+        if (e2 >= dy) { err += dy; x0 += sx; }
+        if (e2 <= dx) { err += dx; y0 += sy; }
+      }
+    }
+
+    goalPts(side) {
+      const s = side === 0 ? -1 : 1, xb = side + s * C.GOAL_D, y1 = C.GOAL_Y1, y2 = C.GOAL_Y2, H = C.GOAL_H, Hb = H * 0.8;
+      return {
+        f1: this.P(side, y1), f2: this.P(side, y2), f1t: this.P(side, y1, H), f2t: this.P(side, y2, H),
+        b1: this.P(xb, y1), b2: this.P(xb, y2), b1t: this.P(xb, y1, Hb), b2t: this.P(xb, y2, Hb),
+      };
+    }
+
+    netPattern() {
+      if (this._net) return this._net;
+      const c = document.createElement('canvas'); c.width = 2; c.height = 2;
+      const g = c.getContext('2d');
+      g.fillStyle = 'rgba(20,30,20,0.3)'; g.fillRect(0, 0, 2, 2);
+      g.fillStyle = 'rgba(240,240,240,0.55)'; g.fillRect(0, 0, 1, 1); g.fillRect(1, 1, 1, 1);
+      return (this._net = this.ctx.createPattern(c, 'repeat'));
     }
 
     drawGoalBack(side) {
-      const g = this.ctx, { x1, xa, xb, y1, y2, hp } = this.goalBox(side);
-      g.fillStyle = 'rgba(20,30,20,0.35)';
-      g.fillRect(xa, y1 - hp, xb - xa, y2 - y1 + hp);
-      g.fillStyle = 'rgba(240,240,240,0.45)';
-      for (let y = y1 - hp; y <= y2; y += 2) for (let x = xa + ((y & 2) ? 1 : 0); x < xb; x += 2) g.fillRect(x, y, 1, 1);
-      g.fillStyle = '#9aa3a0';
-      g.fillRect(x1, y1 - hp, 1, y2 - y1 + hp);
+      const g = this.ctx, q = this.goalPts(side);
+      g.fillStyle = this.netPattern();
+      g.beginPath();
+      for (const pt of [q.f1t, q.b1t, q.b1, q.b2, q.b2t, q.f2t, q.f2, q.f1]) g.lineTo(pt[0], pt[1]);
+      g.closePath(); g.fill();
+      const frame = '#9aa3a0';
+      this.line(q.b1, q.b1t, frame); this.line(q.b1t, q.b2t, frame); this.line(q.b1, q.b2, frame);
+      this.line(q.f1t, q.b1t, frame); this.line(q.f1, q.b1, frame);
     }
 
     drawGoalFront(side) {
-      const g = this.ctx, { x0, xa, xb, y1, y2, hp } = this.goalBox(side);
-      g.fillStyle = '#c9cfcc';
-      g.fillRect(xa, y1 - hp, xb - xa + 1, 1); // roof edges
-      g.fillRect(xa, y2 - hp, xb - xa + 1, 1);
-      g.fillRect(xa, y2, xb - xa + 1, 1);      // ground edge
-      g.fillStyle = '#ffffff';
-      g.fillRect(x0 - (side === 0 ? 1 : 0), y1 - hp, 2, y2 - y1 + hp + 1); // posts + crossbar
+      const q = this.goalPts(side);
+      this.line(q.f2, q.b2, '#c9cfcc'); this.line(q.b2, q.b2t, '#c9cfcc'); this.line(q.f2t, q.b2t, '#c9cfcc');
+      this.line(q.f1, q.f1t, '#ffffff', 2); this.line(q.f2, q.f2t, '#ffffff', 2); this.line(q.f1t, q.f2t, '#ffffff', 2);
     }
 
     drawSprite(rows, ox, oy, left, pal) {
@@ -277,22 +333,31 @@
     drawPlayer(p, m) {
       const g = this.ctx;
       const kit = p.isGK ? p.team.gkKit : p.team.kit;
-      const x = this.sx(p.rx), y = this.sy(p.ry);
+      const x = this.sx(p.rx, p.ry), y = this.sy(p.ry);
       const pal = { H: p.look.hair, S: p.look.skin, s: shade(p.look.skin), E: '#1a1a1a', T: kit.shirt, t: kit.shade, P: kit.shorts, K: kit.socks, B: '#151515' };
 
       if (p.slide > 0 || p.dive > 0 || p.stun > 0.25) { this.drawLying(p, x, y, pal); return; }
       const left = p.fx < -0.1 || (Math.abs(p.fx) <= 0.1 && p.team.dir < 0);
-      const moving = Math.hypot(p.vx, p.vy) > 0.5;
-      const legs = p.lunge > 0 ? LEGS.lunge : moving ? LEGS[RUN[Math.floor(p.anim) % 4]] : LEGS.stand;
-      const rows = UPPER.concat(legs);
+      const speed = Math.hypot(p.vx, p.vy);
+      let rows, bob = 0;
+      if (p.jump > 0) {
+        rows = sprite(HEAD, 'armsUp', 'knee', 'heelUp');
+        bob = -Math.round(Math.sin(Math.PI * (1 - p.jump / 0.35)) * 5);
+      } else if (p.kickAnim > 0) rows = sprite(HEAD, 'armB', 'knee', 'kick');
+      else if (p.lunge > 0) rows = sprite(HEAD_LEAN, 'armA', 'wide', 'lunge');
+      else if (speed > 0.6) {
+        const f = RUN[Math.floor(p.anim) % 4];
+        rows = sprite(speed > 3 ? HEAD_LEAN : HEAD, f.torso, f.shorts, f.legs);
+        bob = f.bob;
+      } else rows = sprite(HEAD, 'idle', 'idle', 'stand');
       const lean = p.lunge > 0 ? (left ? -1 : 1) : 0;
-      const ox = x - 4 + (left ? -1 : 0) + lean, oy = y - rows.length + 1;
+      const ox = x - 4 + (left ? -1 : 0) + lean, oy = y - rows.length + 1 + bob;
       this.drawSprite(rows, ox, oy, left, pal);
       // keeper gloves
       if (p.isGK) { g.fillStyle = '#f4f4f4'; g.fillRect(ox + (left ? 2 : 1), oy + 9, 1, 1); g.fillRect(ox + (left ? 8 : 7), oy + 9, 1, 1); }
       // holding off a defender: arm out towards them
       if (p.shielding) {
-        const toLeft = this.sx(p.shielding.rx) < x;
+        const toLeft = this.sx(p.shielding.rx, p.shielding.ry) < x;
         const ax = toLeft ? ox - 1 : ox + 9;
         g.fillStyle = pal.T; g.fillRect(toLeft ? ax + 1 : ax - 1, oy + 7, 1, 1);
         g.fillStyle = pal.S; g.fillRect(ax, oy + 7, 1, 1); g.fillRect(toLeft ? ax - 1 : ax + 1, oy + 7, 1, 1);
@@ -309,7 +374,9 @@
       const f = (dx) => (dirx > 0 ? x + dx : x - dx); // dx measured in the slide direction
       const rect = (col, dx0, dx1, y0, h) => { g.fillStyle = col; g.fillRect(Math.min(f(dx0), f(dx1)), y + y0, Math.abs(dx1 - dx0) + 1, h); };
       if (p.dive > 0) {
-        // keeper at full stretch: gloves leading
+        // keeper at full stretch: gloves leading, lifted towards the ball's height mid-dive
+        const prog = p.diveTotal ? 1 - p.dive / p.diveTotal : 0.5;
+        y -= Math.round((p.diveZ || 0) * PZ * Math.sin(Math.PI * Math.min(1, prog * 1.15)));
         rect(pal.T, -3, 3, -6, 4); rect(pal.P, -6, -4, -6, 4); rect(pal.K, -10, -7, -5, 2);
         rect(pal.S, 4, 5, -7, 3); rect(pal.H, 4, 4, -7, 2);
         rect('#f4f4f4', 7, 8, -8, 2); rect(pal.T, 6, 6, -7, 1);
@@ -323,7 +390,7 @@
 
     drawBall(b) {
       const g = this.ctx;
-      const x = this.sx(b.rx) - 1, y = this.sy(b.ry, b.rz) - 3;
+      const x = this.sx(b.rx, b.ry) - 1, y = this.sy(b.ry, b.rz) - 3;
       g.fillStyle = '#111'; g.fillRect(x - 1, y, 6, 4); g.fillRect(x, y - 1, 4, 6);
       g.fillStyle = '#ffffff'; g.fillRect(x, y, 4, 4);
       g.fillStyle = '#c8cdd0'; g.fillRect(x + 1, y + 3, 3, 1); g.fillRect(x + 3, y + 1, 1, 2);
@@ -333,7 +400,7 @@
     drawMarkers(m) {
       const g = this.ctx, p = m.controlled;
       if (!p) return;
-      const x = this.sx(p.rx), y = this.sy(p.ry);
+      const x = this.sx(p.rx, p.ry), y = this.sy(p.ry);
       const bob = Math.floor(this.t * 4) % 2;
       const top = y - 24 + bob;
       g.fillStyle = '#000'; g.fillRect(x - 3, top - 1, 7, 1);
@@ -370,9 +437,8 @@
     drawIdle(dt) {
       this.t += dt;
       this.cam.x = C.W / 2 + Math.sin(this.t * 0.08) * 30;
-      this.cam.y = C.H / 2;
-      this.ctx.fillStyle = '#1b2230'; this.ctx.fillRect(0, 0, VW, VH);
-      this.ctx.drawImage(this.pitch, this.sx(-M), this.sy(-M));
+      this.cam.y = C.H / 2 + 2.5;
+      this.drawPitch();
       this.drawGoalBack(0); this.drawGoalBack(C.W);
       this.drawGoalFront(0); this.drawGoalFront(C.W);
     }

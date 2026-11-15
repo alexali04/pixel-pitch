@@ -21,12 +21,16 @@ then visit http://localhost:8765.
 | J | ground pass | switch player |
 | K | lofted pass | slide tackle |
 | Space | shoot | standing tackle |
+| J / Space with the ball in the air near you | header pass / header at goal | header clearance (Space) |
+| Space with the ball loose on the floor | sprint to collect it | sprint to intercept it |
 | P / Esc | pause | pause |
 | R | restart the match | restart the match |
+| M | mute / unmute sound | mute / unmute sound |
 
-Hold J / K / Space to set strength, like how far you swing your leg: a tap on J is a soft
-nudge and a full hold is a bullet; a tap on K is a little dink over a foot and a full hold is
-a ~40m ball; a full wind-up on a shot is hard but can fly wide or over. L and C also shoot.
+Hold J / K / Space to set strength, like how far you swing your leg: a tap on J is a firm
+~15m pass and a full hold is a ~40m ball (capped, so it won't fly out of play); keepers
+play it firmer, and back-passes to the keeper always reach him; a tap on K is a short
+chip that still arcs over a defender and a full hold is a ~45m ball; a full wind-up on a shot is hard but can fly wide or over. L and C also shoot.
 
 **Aiming passes:** the pass goes exactly where the aim points. The aim starts at your direction
 when you press J/K and then turns smoothly (~150°/s) towards whatever direction you hold, so
@@ -56,5 +60,6 @@ Toggle on the title screen (button or **F**):
 - `js/ai.js` – team shape, pressing, ball-carrier decisions, goalkeepers
 - `js/match.js` – match rules, restarts, kicks, tackles, user input handling
 - `js/render.js` – pixel renderer (pre-rendered stadium, sprites, radar)
+- `js/audio.js` – synthesized sound effects (Web Audio, no asset files)
 - `js/main.js` – screens and the fixed-timestep loop
 - `js/debug.js` – headless AI-vs-AI sims for tuning: `PP.debug.sim(4)` in the console
