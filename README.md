@@ -33,7 +33,7 @@ play it (better first touch = quicker); a pass released early goes as soon as it
 Hold J / K / Space to set strength, like how far you swing your leg: a tap on J is a firm
 ~15m pass and a full hold is a ~40m ball (capped, so it won't fly out of play); keepers
 play it firmer, and back-passes to the keeper always reach him; a tap on K is a short
-chip that still arcs over a defender and a full hold is a ~45m ball; a full wind-up on a shot is hard but can fly wide or over. L and C also shoot.
+chip that still arcs over a defender and a full hold is a ~45m ball; a full wind-up on a shot is hard but can fly wide or over. L and C also shoot. From point-blank range (about 13m out, central) a shot you aren't aiming at the goal mouth goes towards goal anyway, away from the keeper.
 
 **Aiming passes:** the pass goes where the aim points, with a light assist: it leans onto a
 team-mate's run when one is within ~14° of the line, leans a touch towards goal in the final
@@ -89,6 +89,78 @@ Toggle on the title screen (button or **F**):
   defence/midfield stars. The clock jumps between phases (7 per half).
 - **Full court ON**: continuous 11v11, you defend too. Control switches to the best goal-side
   defender, who also pokes at the ball automatically when close.
+
+## Test arena
+
+**Test arena** on the title screen: practise against exactly the opponent you want. Pick your
+club, how they defend (low block / mid block / high press), their shape (narrow / balanced /
+wide), their strength (very weak to very strong, or even with you), their formation, full game or
+attacking phases, and half length. No crowd, no season; R restarts the same match. Click a row to
+change it (shift-click goes back).
+
+## Season
+
+**Start season** on the title screen and pick any of the 20 clubs in the 2026/27 Premier
+League (player names are made up). Each club has a rating, a formation and a play style that
+drives its AI (low / mid / high block, width, forwards up or back), and a rival: rivalry games
+are flagged as derbies. 38 rounds, home and away. The season saves automatically in the browser;
+**Start over** deletes it. **Friendly** lets you pick any two clubs.
+
+- **Hub**: next fixture with both teams' star ratings and the opponent's style, the table around
+  you, coins, fan and board meters. Table / Fixtures / Squad screens.
+- **Squad**: your XI on a pitch map plus a 7-man bench. Click one player and then another to swap
+  them. Pick a formation (4-3-3, 4-4-2, 4-1-4-1, 4-3-1-2, 3-4-3, 4-2-3-1); players are re-arranged
+  to suit it. Players out of their natural position (shown in brackets, amber / red) lose some
+  skill. Tactics: block without the ball, width, and whether the forwards drop back. The map
+  shows your shape **without the ball** (it moves as you change tactics) or **with the ball**.
+- You play your match; the other nine are simulated from team ratings (attack vs defence,
+  midfield control, home advantage).
+- **Coins**: 300 / 120 / 50 for a win / draw / defeat, +20 a goal, plus the gate at home games
+  (bigger when the fans are happy), and end-of-season prize money by position. Nothing to spend
+  them on yet.
+- **Fans** like wins and goals and hate defeats (most at home). **Board** judges your points
+  against the pre-season prediction from your squad's rating. Both drift back towards neutral.
+  An empty board meter, or a poor board and a season far below expectations, gets you sacked.
+- Next season keeps your squad, coins and half your moods; the other clubs' squads drift a little.
+
+### Champions League
+
+The current format: a 36-club **league phase** (the Premier League's top four, or in the first
+season the four strongest squads, plus 32 continental clubs). Each club plays eight different
+opponents, two from each pot, never one from its own country, over eight matchdays between
+league rounds. **1st-8th** go straight to the Round of 16; **9th-24th** play two-legged knockout
+play-offs for the other eight places; 25th-36th are out. Round of 16, quarter-finals and
+semi-finals are two-legged (the better league-phase finisher hosts the second leg; level on
+aggregate means penalties), then a one-off final at a neutral ground. You play your own games;
+the rest are simulated. The **Europe** screen shows the 36-club table and every tie. European
+nights pay more (bigger gates, prize money per round) and lift fans and board.
+
+## Fouls
+
+Tackles can be fouls: likeliest when the tackle misses the ball, comes from behind, or is a
+slide, and less likely from good tacklers (and much less likely in a defender's own box). A foul
+gives a free kick where it happened, or a **penalty** in the box: everyone else waits outside the
+box, the keeper stays on his line and has to guess a side. Reckless challenges (sliding in from
+behind above all) get a yellow card; a second yellow is a red and the player is sent off, leaving
+his side a man short. Cards are listed at half-time and full time.
+
+## Presentation
+
+- **Goal replays**: after each goal the last few seconds replay in slow motion (J / Space /
+  click skips).
+- **Sound**: the crowd is real: field recordings of 29,546 fans at FC St. Pauli's Millerntor
+  Stadium. A calm ambience bed (only the stretches without big reactions in them) runs under the
+  match: hushed while you keep the ball unpressed, swelling as you near their box; a goal roar
+  when you score, a groan when they do; an "ooh" as a shot is saved, blocked or hits the
+  woodwork, and for a shot that's going wide it starts as the shot is struck so the groan lands as
+  it passes the post (louder for your shots); outrage when your player is fouled. Reactions start
+  at hand-picked cue points in the recordings. The crowd falls silent on pause and half-time. Everything else (kicks, whistles, menu music, clicky buttons) is
+  synthesized. M mutes all.
+
+## Credits
+
+Crowd recordings: "Sound Of Sankt Pauli" pack by itmightgetloud (Philipp Feit) on Freesound,
+CC0 (freesound.org/people/itmightgetloud/packs/44412/). Files in `audio/`.
 
 ## Tactics
 

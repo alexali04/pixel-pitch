@@ -8,7 +8,6 @@
     autoTackle: true,      // defenders take the ball off attackers who run into them
     autoSprint: true,      // sprint automatically when defending near your goal
     defAssist: 'idle',     // off | idle | always : your defender positions/presses himself
-    fwdDefend: 'help',     // help | high : (tactics) forwards drop back on defence or stay up for the counter
   };
   const S = (PP.settings = Object.assign({}, DEFAULTS));
   try { Object.assign(S, JSON.parse(localStorage.getItem('pp.smooth') || '{}')); } catch (e) { /* no storage */ }
@@ -25,12 +24,10 @@
     autoTackle: [[true, 'On'], [false, 'Off']],
     autoSprint: [[true, 'On'], [false, 'Off']],
     defAssist: [['idle', 'When idle'], ['always', 'Always (you nudge)'], ['off', 'Off']],
-    fwdDefend: [['help', 'Drop back and help'], ['high', 'Stay high for the counter']],
   };
   PP.SETTING_LABELS = {
     passAssist: 'Pass assist', aim: 'Aim with', aimSpeed: 'Key aim speed',
     mouseSens: 'Mouse sensitivity',
     autoTackle: 'Auto-tackle', autoSprint: 'Auto-sprint on defence', defAssist: 'Defending assist',
-    fwdDefend: 'Forwards on defence',
   };
 })();

@@ -95,7 +95,9 @@ html, body {
   box-shadow: 0 0 0 calc(var(--s) * 1px) #3a4a55 inset;
   padding: calc(var(--s) * 10px) calc(var(--s) * 14px);
   text-align: center;
-  max-width: 90%;
+  max-width: 94%;
+  max-height: 96%;
+  overflow-y: auto;
 }
 .card h1 {
   font-size: calc(var(--s) * 18px);
@@ -157,3 +159,68 @@ kbd {
 .squad .st { color: var(--accent); } .squad .tr { color: #9fd3c7; text-align: left; }
 #playerTag .stam { margin-top: calc(var(--s) * 2px); height: calc(var(--s) * 3px); background: #3a3f44; border: calc(var(--s) * 0.5px) solid #000; }
 #playerTag .stam i { display: block; height: 100%; }
+
+/* ---- season ---- */
+.seasonbar { display: flex; flex-wrap: wrap; justify-content: center; gap: calc(var(--s) * 3px) calc(var(--s) * 7px); font-size: calc(var(--s) * 5px); margin-bottom: calc(var(--s) * 6px); color: #cfd8d6; }
+.seasonbar small, .card h2 small, .ratings small { color: #9fb0ad; font-size: 0.75em; }
+.coins { color: var(--accent); }
+.meter { display: inline-block; vertical-align: middle; width: calc(var(--s) * 22px); height: calc(var(--s) * 3.5px); background: #3a3f44; border: calc(var(--s) * 0.5px) solid #000; }
+.meter i { display: block; height: 100%; }
+.league { margin: calc(var(--s) * 4px) auto 0; border-collapse: collapse; font-size: calc(var(--s) * 4.2px); }
+.league th { color: var(--accent); font-weight: normal; padding: 0 calc(var(--s) * 2.5px) calc(var(--s) * 1.5px); }
+.league td { padding: calc(var(--s) * 0.7px) calc(var(--s) * 2.5px); color: #cfd8d6; text-align: center; }
+.league .nm { text-align: left; }
+.league td.nm { color: var(--fg); }
+.league .pts { color: var(--accent); }
+.league .form { letter-spacing: calc(var(--s) * 0.5px); color: #9fd3c7; text-align: left; }
+.league tr.me td { background: rgba(46, 196, 182, 0.25); color: #fff; }
+.fixtures { list-style: none; display: grid; grid-template-columns: repeat(4, auto); gap: calc(var(--s) * 1.5px) calc(var(--s) * 8px); justify-content: center; text-align: left; font-size: calc(var(--s) * 4.2px); color: #cfd8d6; }
+.fixtures span { display: inline-block; width: calc(var(--s) * 9px); color: #6f817e; text-align: right; margin-right: calc(var(--s) * 2px); }
+.fixtures li.next { color: var(--accent); }
+.fixtures .w { color: #5bd15b; } .fixtures .l { color: #e4572e; } .fixtures .d { color: #f3a712; }
+.results { list-style: none; display: grid; grid-template-columns: repeat(3, auto); gap: calc(var(--s) * 1.5px) calc(var(--s) * 8px); justify-content: center; font-size: calc(var(--s) * 4.2px); color: #cfd8d6; }
+.clubs td { padding: calc(var(--s) * 1px) calc(var(--s) * 4px); }
+.clubs tr.pick { cursor: pointer; }
+.clubs tr.pick:hover td { background: rgba(255, 210, 63, 0.18); color: #fff; }
+.clubs td.hint { text-align: left; color: #9fb0ad; }
+.sw { display: inline-block; width: calc(var(--s) * 4px); height: calc(var(--s) * 4px); border: calc(var(--s) * 0.5px) solid #000; margin-right: calc(var(--s) * 3px); vertical-align: middle; }
+.derby { color: #ff6b4a; }
+.btn.sm { padding: 0 calc(var(--s) * 3px); font-size: calc(var(--s) * 5px); box-shadow: none; }
+/* squad screen */
+.squadwrap { display: flex; gap: calc(var(--s) * 10px); align-items: flex-start; justify-content: center; margin-top: calc(var(--s) * 4px); }
+.pitchmap { position: relative; width: calc(var(--s) * 150px); height: calc(var(--s) * 170px); flex: none;
+  background: repeating-linear-gradient(180deg, #2f7d32 0 calc(var(--s) * 17px), #2a722d calc(var(--s) * 17px) calc(var(--s) * 34px));
+  border: calc(var(--s) * 1px) solid #e8f5e9; }
+.pitchmap .half { position: absolute; left: 0; right: 0; top: 0; border-bottom: calc(var(--s) * 0.5px) solid rgba(255,255,255,0.5); height: 42.5%; }
+.pitchmap .box { position: absolute; left: 25%; right: 25%; bottom: 0; height: 13%; border: calc(var(--s) * 0.5px) solid rgba(255,255,255,0.5); border-bottom: none; }
+.slot { position: absolute; transform: translate(-50%, -50%); text-align: center; cursor: pointer; width: calc(var(--s) * 40px); line-height: 1.25; }
+.slot i { display: inline-block; font-style: normal; width: calc(var(--s) * 10px); height: calc(var(--s) * 10px); line-height: calc(var(--s) * 10px); border: calc(var(--s) * 0.5px) solid #000; font-size: calc(var(--s) * 4.5px); }
+.slot b { display: block; font-weight: normal; font-size: calc(var(--s) * 3.8px); color: #fff; text-shadow: 1px 1px 0 #000; white-space: nowrap; }
+.slot small { display: block; font-size: calc(var(--s) * 3.2px); color: #d8e8e4; text-shadow: 1px 1px 0 #000; white-space: nowrap; }
+.slot.near small { color: #f3c64a; } .slot.bad small { color: #ff7b5c; }
+.slot.sel i, .benchp.sel { outline: calc(var(--s) * 1px) solid var(--accent); }
+.slot:hover i { outline: calc(var(--s) * 0.5px) solid #fff; }
+.side { text-align: left; font-size: calc(var(--s) * 4.2px); max-width: calc(var(--s) * 200px); }
+.tac { margin-bottom: calc(var(--s) * 3px); display: flex; flex-wrap: wrap; gap: calc(var(--s) * 2px); align-items: center; }
+.tac span { width: calc(var(--s) * 44px); color: #9fd3c7; }
+.btn.sm.on { background: var(--accent); }
+.benchp { cursor: pointer; padding: calc(var(--s) * 0.8px) calc(var(--s) * 2px); color: #cfd8d6; }
+.benchp:hover { background: rgba(255, 210, 63, 0.15); }
+.benchp span { display: inline-block; width: calc(var(--s) * 8px); color: var(--accent); }
+.benchp small { color: #9fb0ad; }
+/* champions league */
+.comp { font-size: calc(var(--s) * 4.6px); color: #9fd3c7; margin: 0 0 calc(var(--s) * 2px) !important; letter-spacing: calc(var(--s) * 0.3px); }
+.comp.ucl { color: #7fb8ff; }
+.note { color: var(--accent) !important; }
+.groups { display: grid; grid-template-columns: repeat(2, auto); gap: calc(var(--s) * 4px) calc(var(--s) * 12px); justify-content: center; }
+.groups .league { margin-top: 0; }
+.league tr.thru td.nm { color: #7fb8ff; }
+.meclub { color: var(--accent); }
+.card p.ko { font-size: calc(var(--s) * 5px); margin: calc(var(--s) * 2px) 0; }
+.pitchmap .slot { transition: left 0.35s, top 0.35s; }
+.tac.mapv { justify-content: center; margin-top: calc(var(--s) * 2px); }
+.league tr.z1 td:first-child { color: #7fb8ff; }
+.league tr.z2 td:first-child { color: #9fd3c7; }
+.league tr.z3 td { color: #7d8b89; }
+.z1k { color: #7fb8ff; } .z2k { color: #9fd3c7; }
+.groups .league td { padding: calc(var(--s) * 0.35px) calc(var(--s) * 2px); font-size: calc(var(--s) * 3.8px); }

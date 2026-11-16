@@ -10,7 +10,14 @@
       this.isGK = slot.role === 'GK';
       this.name = info.name;
       this.num = info.num;
-      this.stats = info.stats;
+      // Out of position: skills (not the physical ones) suffer.
+      const fit = info.pos ? PP.fit(info.pos, slot.role) : 1;
+      this.fit = fit;
+      if (fit < 1) {
+        const k = 1 - (1 - fit) * 0.5, PHYS = ['pace', 'acceleration', 'stamina', 'strength', 'agility'];
+        this.stats = Object.fromEntries(Object.entries(info.stats).map(([n, v]) => [n, PHYS.includes(n) ? v : Math.round(v * k)]));
+      } else this.stats = info.stats;
+      this.pos = info.pos || slot.role;
       this.look = info.look;
       this.foot = info.foot || 'R';
       this.trait = info.trait || null;
@@ -136,7 +143,7 @@
       this.y = U.clamp(this.y, -2.5, C.H + 2.5);
     }
 
-    isDown() { return this.stun > 0 || this.slide > 0 || this.dive > 0; }
+    isDown() { return this.stun > 0 || this.slide > 0 || this.dive > 0 || this.sentOff; }
   }
 
   PP.Player = Player;

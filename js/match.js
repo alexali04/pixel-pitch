@@ -95,6 +95,7 @@
       this.ball.reset(C.W / 2, C.H / 2);
       for (const t of this.teams) {
         for (const p of t.players) {
+          if (p.sentOff) continue;
           const pos = t.toWorld(Math.min(p.slot.d * 0.6, 0.46), p.slot.l);
           p.x = pos.x; p.y = pos.y; p.vx = 0; p.vy = 0;
           p.fx = t.dir; p.fy = 0;
@@ -144,7 +145,7 @@
       for (const q of this.players) { q.ox = q.x; q.oy = q.y; }
       b.ox = b.x; b.oy = b.y; b.oz = b.z;
       if (kind !== 'gk') this.sfx('whistle', 1);
-      const names = { throw: 'Throw-in', corner: 'Corner', goalkick: 'Goal kick', freekick: 'Free kick' };
+      const names = { throw: 'Throw-in', corner: 'Corner', goalkick: 'Goal kick', freekick: 'Free kick', penalty: 'Penalty' };
       if (names[kind]) this.say(names[kind], 1.1);
     }
 
@@ -248,6 +249,21 @@
       this.release(p, type, target);
     }
 
+    // Throw-in from the hands: released at head height, dropping at (tx, ty).
+    throwBall(p, tx, ty, target) {
+      const b = this.ball;
+      // Released from inside the line, never back over it, and aimed to arrive at about waist
+      // height (easy to take down), not dropping on his head.
+      b.y = U.clamp(b.y, 0.4, C.H - 0.4);
+      ty = U.clamp(ty, 3, C.H - 3);
+      const D = Math.max(2, U.dist(b.x, b.y, tx, ty)), T = 0.3 + D / 24;
+      const err = U.gauss() * 0.04 * (1.4 - p.stats.shortPass / 100);
+      const n = U.rot((tx - b.x) / D, (ty - b.y) / D, err);
+      const L = Ball.loftLaunch(D, T, 0, -1.0);
+      b.vx = n.x * L.s; b.vy = n.y * L.s; b.vz = L.vz; b.z = 1.8;
+      this.release(p, 'pass', target || null);
+    }
+
     // Where a pass to q should be aimed, leading their run.
     leadPoint(p, q, lofted, power = null, v0 = null) {
       let tx = q.x, ty = q.y;
@@ -339,20 +355,25 @@
       const gx = team.attackX;
       const ty = C.H / 2 + U.clamp(aimY, -1, 1) * 3.2;
       const D = U.dist(b.x, b.y, gx, ty);
-      const pressure = this.pressureOn(p);
+      const pen = this.state === 'restart' && this.restart && this.restart.kind === 'penalty';
+      const pressure = pen ? 0 : this.pressureOn(p);
       const fin = p.stats.finishing / 100, pow = p.stats.shotPower / 100;
       power = U.clamp(power, 0.15, 1);
       const speed = 21 + 10 * power + 6 * pow * power;  // tap ~21 m/s, full wind-up ~35 m/s
       const longShot = D > 20 ? 1 + (D - 20) * 0.02 * (1.3 - p.stats.longShots / 100) : 1;
       const angErr = (0.035 + D * 0.002 + power * power * 0.06 + pressure * 0.09 * (1.3 - p.stats.composure / 100)) * (1.6 - fin) * longShot * (team.isUser ? 1 : Match.CPU_ERR);
-      const dir = U.rot((gx - b.x) / D, (ty - b.y) / D, U.gauss() * angErr);
+      const dir = U.rot((gx - b.x) / D, (ty - b.y) / D, U.gauss() * angErr * (pen ? 0.5 : 1));
       const t = D / speed;
-      const h = Math.max(0.1, 0.35 + power * 1.25 + U.gauss() * (0.35 + power * 0.8 + pressure * 0.5) * (1.5 - fin));
+      const h = Math.max(0.1, 0.35 + power * 1.25 + U.gauss() * (0.35 + power * 0.8 + pressure * 0.5) * (1.5 - fin) * (pen ? 0.5 : 1));
       b.vx = dir.x * speed; b.vy = dir.y * speed;
       b.vz = h / t + (C.G * t) / 2;
       b.z = 0.05;
       this.stats.shots[this.idx(team)]++;
       this.release(p, 'shot', null);
+      if (pen) { // the keeper has to guess: right side (or stays up for one down the middle)?
+        const side = Math.abs(aimY) < 0.25 ? 0 : Math.sign(aimY), guess = Math.random() < 0.3 ? 0 : Math.random() < 0.5 ? -1 : 1;
+        this.ball.lastKick.pen = { right: side === guess };
+      }
     }
 
     // Chip: lifted over the keeper to drop under the bar. More hold = higher and harder, but
@@ -365,12 +386,12 @@
       const D = U.dist(b.x, b.y, gx, ty) * (1 + U.gauss() * err * 0.6);
       const dir = U.rot((gx - b.x), (ty - b.y), U.gauss() * err);
       const n = U.norm(dir.x, dir.y);
-      const T = 0.9 + D / 16 + power * 0.35;                  // hang time
+      const T = 0.6 + D / 24 + power * 0.2;                   // hang time: quick, before he can get back
       const h = 1.5 + U.gauss() * 0.4 * (1.5 - fin);        // height as it crosses the line
-      const L = Ball.loftLaunch(D, T, 1, h);                // full backspin: floats up, drops in
+      const L = Ball.loftLaunch(D, T, 0.55, h);             // some backspin: up and over, drops in
       b.vx = n.x * L.s; b.vy = n.y * L.s;
       b.vz = L.vz; b.z = 0.05;
-      this.pendingBack = 1;
+      this.pendingBack = 0.55;
       this.stats.shots[this.idx(team)]++;
       this.release(p, 'shot', null);
       this.pop(p, 'CHIP', '#9fd3ff');
@@ -429,7 +450,15 @@
       ch = U.clamp(ch, 0.06, 0.85);
       if (auto) ch = U.clamp(0.82 + (t.stats.tackling - hold) * 0.006, 0.5, 0.94) * (this.time < b.protectUntil && !settling ? 0.6 : 1) * (front < -0.3 ? 0.8 : 1);
       const userLost = c.team.isUser, userWon = t.team.isUser;
-      if (Math.random() < ch) {
+      const won = Math.random() < ch;
+      // Fouls: going through the man. Likeliest when the tackle misses the ball, from behind,
+      // or sliding; good tacklers commit fewer.
+      const behind = front < -0.3;
+      let fp = won ? (behind ? (slide ? 0.35 : 0.12) : slide ? 0.05 : 0.015) : (slide ? 0.4 : auto ? 0.06 : 0.18) * (behind ? 1.8 : 1);
+      fp *= U.clamp(1.5 - t.stats.tackling / 100, 0.6, 1.2);
+      if (PP.AI.inBox(t.team, c.x, c.y)) fp *= 0.3; // defenders are careful in their own box
+      if (Math.random() < fp) { this.foul(t, c, slide, behind, won); return; }
+      if (won) {
         c.stun = slide ? 1.4 : auto ? 1.2 : 1.0; c.kickCd = 0.8; // he's on the floor for a moment
         this.sfx('tackle');
         if (auto) { this.pop(c, 'TACKLED!', '#ffd23f'); this.gainPossession(t); this.scrappy(t, 0.55); return; }
@@ -449,6 +478,55 @@
         const strong = c.stats.strength > t.stats.strength + 6 && front < 0.2;
         if (!auto || strong) this.pop(c, strong ? 'HELD OFF' : 'MISSED', userWon ? '#e4572e' : '#a8e6a1');
       }
+    }
+
+    // A foul: the fouled side gets a free kick, or a penalty if it was in the box. Reckless
+    // challenges (sliding in from behind especially) get a yellow card; a second is a red.
+    foul(t, c, slide, behind, wonBall) {
+      const b = this.ball;
+      c.stun = Math.max(c.stun, 1.2); c.kickCd = 0.8;
+      this.sfx('tackle'); this.sfx('whistle', 1);
+      const vs = c.team, pen = PP.AI.inBox(t.team, c.x, c.y);
+      // the home crowd: furious when their man is fouled, muted when their man fouls
+      if (this.sound && PP.Sound) PP.Sound.play('foul', vs.isUser ? (pen ? 1 : 0.75) : 0.3);
+      let card = null;
+      const reckless = (slide && behind) ? 0.65 : slide ? (wonBall ? 0.15 : 0.35) : behind ? 0.3 : 0.12;
+      if (Math.random() < reckless) card = (t.yellow || 0) >= 1 ? 'red' : 'yellow';
+      this.pop(c, 'FOUL!', '#ff6b4a');
+      if (card) this.book(t, card);
+      b.owner = null; b.vx = b.vy = b.vz = 0;
+      if (pen) {
+        const spotX = t.team.ownX + t.team.dir * C.SPOT;
+        const taker = vs.outfield().slice().sort((a, d) => d.stats.finishing + d.stats.composure - a.stats.finishing - a.stats.composure)[0];
+        this.restartOrEnd('penalty', vs, taker, spotX, C.H / 2);
+        // everyone else outside the box straight away
+        for (const tm of this.teams) for (const p of tm.players) {
+          if (p === taker || p.sentOff || (p.isGK && tm !== vs)) continue;
+          const pos = p.isGK ? tm.toWorld(0.02, 0.5) : PP.AI.shapeTarget(this, tm, p, 'defend', 0.5);
+          p.x = pos.x; p.y = pos.y; p.vx = p.vy = 0; p.ox = p.x; p.oy = p.y; p.tgx = null;
+        }
+        const g = t.team.gk; g.x = t.team.ownX + t.team.dir * 0.3; g.y = C.H / 2; g.ox = g.x; g.oy = g.y;
+        this.say('PENALTY!', 2);
+      } else {
+        this.restartOrEnd('freekick', vs, c, U.clamp(c.x, 1, C.W - 1), U.clamp(c.y, 1, C.H - 1));
+        c.stun = 0;
+      }
+    }
+
+    book(p, card) {
+      const minute = Math.min(90, this.minute + 1);
+      if (card === 'yellow') {
+        p.yellow = (p.yellow || 0) + 1;
+        this.events.push({ type: 'card', card: 'yellow', team: this.idx(p.team), minute, name: p.name });
+        this.pop(p, 'YELLOW CARD', '#ffd23f');
+        if (p.yellow < 2) return;
+      }
+      this.events.push({ type: 'card', card: 'red', team: this.idx(p.team), minute, name: p.name });
+      this.pop(p, 'RED CARD!', '#e4572e');
+      this.say(`${p.name} is sent off!`, 2.2);
+      p.sentOff = true; p.stun = 0; p.slide = 0; p.lunge = 0; p.receiving = null;
+      p.x = C.W / 2 + (p.team.dir === 1 ? -4 : 4); p.y = -3; p.vx = p.vy = 0; p.ox = p.x; p.oy = p.y;
+      if (this.controlled === p) this.controlled = this.bestDefender(this.ball.x, this.ball.y) || this.home.outfield()[0];
     }
 
     // A player flagged offside at the moment of the pass plays the ball: free kick.
@@ -714,6 +792,17 @@
       return { gx, gy: U.clamp(gy, C.GOAL_Y1 + 0.3, C.GOAL_Y2 - 0.3), aimY: U.clamp((gy - C.H / 2) / 3.2, -1, 1) };
     }
 
+    autoShotDir(p, aim) {
+      const b = this.ball, t = p.team, gx = t.attackX;
+      if (U.dist(b.x, b.y, gx, C.H / 2) > 13 || Math.abs(b.y - C.H / 2) > 11) return null;
+      if ((gx - b.x) * aim.x > 0.05) {
+        const gy = b.y + (aim.y / aim.x) * (gx - b.x);
+        if (Math.abs(gy - C.H / 2) < C.GOAL_W / 2 - 0.3) return null; // you're already on target
+      }
+      const gk = this.other(t).gk, side = gk.y > C.H / 2 ? -1 : 1;
+      return U.norm(gx - b.x, C.H / 2 + side * (C.GOAL_W / 2 - 0.9) - b.y);
+    }
+
     // Direction the ball will actually go for an intended aim: the body turns towards the aim
     // (quick standing, slow at a sprint) and can only strike so far across itself.
     kickDir(p, dt) {
@@ -797,7 +886,7 @@
         // Hold a button to charge strength, release to play it. Tap = soft.
         const restart = this.state === 'restart';
         if (!this.charging) {
-          const setPiece = restart && this.restart && this.restart.kind !== 'phase';
+          const setPiece = restart && this.restart && this.restart.kind !== 'phase' && this.restart.kind !== 'penalty';
           const bp = this.bufferedPress && this.time - this.bufferedPress.t < 0.6 && I.down(this.bufferedPress.kind) ? this.bufferedPress.kind : null;
           this.bufferedPress = null;
           if (this.heldOnGain) this.heldOnGain = this.heldOnGain.filter((k) => I.down(k));
@@ -869,7 +958,10 @@
           this.lastAx = { x: ax.x, y: ax.y };
           // The ball goes where the body allows: it turns towards your aim, and you can only
           // strike so far across it (less at speed).
-          const eff = this.kickDir(p, dt);
+          let eff = this.kickDir(p, dt);
+          // Point blank: Space just puts it towards goal (away from the keeper) if you're not
+          // already aiming at the goal mouth — no time to line it up.
+          if (this.chargeKind === 'shot') { const auto = this.autoShotDir(p, eff); if (auto) eff = auto; }
           const shot = this.chargeKind === 'smart' || (this.chargeKind === 'lob' && !restart) ? this.smartShot(p, eff, this.chargeKind === 'lob') : null;
           if (this.chargeKind === 'shot') {
             const fs = this.shotAim(p, eff, false, true);
@@ -889,7 +981,14 @@
             this.charging = false; this.charge = 0; this.chargeKind = null;
             if (k === 'shot') this.shoot(p, this.preview && this.preview.shot ? this.preview.aimY : ax.y, pw);
             else if (k === 'chip') this.chipShot(p, this.preview.aimY, pw);
-            else {
+            else if (restart && this.restart && this.restart.kind === 'throw') {
+              // Your throw-in: from the hands, 6-22m by how long you held it.
+              const a = this.assistAim(p, eff, true, pw), dist = 6 + pw * 16;
+              const pl = this.passPlan(p, a.x, a.y, false, pw);
+              this.throwBall(p, U.clamp(b.x + a.x * dist, 1, C.W - 1), b.y + a.y * dist, pl.target);
+              this.latch = true; this.latchAxis = { x: ax.x, y: ax.y };
+              if (pl.target) { this.controlled = pl.target; }
+            } else {
               const a = this.assistAim(p, eff, k === 'lob', pw);
               this.userPass(p, this.passPlan(p, a.x, a.y, k === 'lob', pw));
               this.latchAxis = { x: ax.x, y: ax.y };
@@ -1013,6 +1112,7 @@
       const b = this.ball;
       if (b.owner || this.state !== 'play' || this.autoplay) return;
       this.ballPath = b.predict(30, 0.1);
+      this.anticipateMiss();
       let best = null, bt = 1e9, ot = 1e9;
       for (const p of this.players) {
         if (p.isDown() || (p.isGK && p.team.isUser)) continue;
@@ -1047,12 +1147,69 @@
 
     // ---------- simulation ----------
 
+    // ---------- goal replays ----------
+    // Every other step (60 Hz) the visible state is recorded into a ring buffer; after a goal
+    // the last few seconds play back in slow motion.
+    snap() {
+      const P = Match.REC_P, out = new Float32Array(this.players.length * P.length + 3);
+      let i = 0;
+      for (const p of this.players) for (const k of P) out[i++] = p[k] || 0;
+      const b = this.ball; out[i++] = b.x; out[i++] = b.y; out[i] = b.z;
+      return out;
+    }
+    applySnap(f, keepOld) {
+      const P = Match.REC_P, b = this.ball;
+      let i = 0;
+      for (const p of this.players) {
+        if (keepOld) { p.ox = p.x; p.oy = p.y; } else { p.ox = null; p.oy = null; }
+        for (const k of P) p[k] = f[i++];
+        p.shielding = null;
+      }
+      if (keepOld) { b.ox = b.x; b.oy = b.y; b.oz = b.z; } else { b.ox = b.oy = b.oz = null; }
+      b.x = f[i++]; b.y = f[i++]; b.z = f[i];
+    }
+    record() {
+      if (this.autoplay) return;
+      this.recTick = !this.recTick;
+      if (!this.recTick) return;
+      const r = this.rec || (this.rec = []);
+      r.push(this.snap());
+      this.recCount = (this.recCount || 0) + 1;
+      if (r.length > 480) r.shift();
+    }
+    startReplay(then) {
+      const r = this.rec || [], first = (this.recCount || 0) - r.length; // absolute index of r[0]
+      const end = Math.min(r.length, (this.goalRecAt ?? Infinity) - first);
+      const start = Math.max(0, end - 230); // ~2.8s before the goal + 1s after
+      if (this.autoplay || end - start < 30) { then(); return; }
+      this.replay = { frames: r.slice(start, end), t: 0, live: this.snap(), liveBall: { vx: this.ball.vx, vy: this.ball.vy, vz: this.ball.vz, owner: this.ball.owner }, then, shown: -1 };
+      this.state = 'replay';
+      this.charging = false; this.preview = null;
+    }
+    stepReplay(dt, I) {
+      const R = this.replay;
+      R.t += dt * 0.6; // slow motion
+      const fi = Math.floor(R.t * 60);
+      const skip = I && (I.hit('pass') || I.hit('shoot') || I.hit('lob') || I.hit('start') || I.hit('click'));
+      if (fi >= R.frames.length || skip) {
+        this.applySnap(R.live, false);
+        Object.assign(this.ball, R.liveBall);
+        this.replay = null;
+        R.then();
+        return;
+      }
+      if (fi !== R.shown) { this.applySnap(R.frames[fi], R.shown >= 0); R.shown = fi; }
+      else { for (const p of this.players) { p.ox = p.x; p.oy = p.y; } const b = this.ball; b.ox = b.x; b.oy = b.y; b.oz = b.z; }
+    }
+
     step(dt, I) {
+      if (this.state === 'replay') { this.stepReplay(dt, I); return; }
       this.time += dt;
       for (const p of this.players) { p.ox = p.x; p.oy = p.y; }
       const b0 = this.ball; b0.ox = b0.x; b0.oy = b0.y; b0.oz = b0.z;
       if (this.banner) { this.banner.t -= dt; if (this.banner.t <= 0) this.banner = null; }
       if (this.state === 'halftime' || this.state === 'fulltime') return;
+      this.record();
 
       if (this.state === 'goal') {
         this.stateT -= dt;
@@ -1061,8 +1218,10 @@
         this.ball.step(dt);
         this.keepBallInNet();
         if (this.stateT <= 0) {
-          if (this.fullCourt) this.kickoff(this.goalConceder);
-          else this.endPhase('goal');
+          this.startReplay(() => {
+            if (this.fullCourt) this.kickoff(this.goalConceder);
+            else this.endPhase('goal');
+          });
         }
         return;
       }
@@ -1244,6 +1403,7 @@
         return;
       }
       if (!best) return;
+      if (lk1 && lk1.type === 'shot' && lk1.team !== best.team && !best.isGK) { this.crowdOoh(lk1); this.pop(best, 'BLOCKED!', '#cfd8d6'); }
       const aiPlayer = this.autoplay || best !== this.controlled;
       if (b.z > 1.1 && aiPlayer) {
         const lk1 = b.lastKick, d = best.team.depth(b.x);
@@ -1285,6 +1445,7 @@
 
       let save = 0.95 - Math.max(0, speed - 22) * 0.02 - (d / reach) * 0.25 + (gk.stats.reflexes - 70) * 0.006;
       if (b.z > 2.0) save -= 0.15;
+      if (lk.pen) save = lk.pen.right ? save * 0.8 : 0.06; // went the wrong way
       // A chip dropping over him: back-pedalling and reaching up and back, he often can't get there.
       const dropping = b.vz < -2 && b.z > 1.2 && speed < 14;
       if (dropping) save -= 0.08 + Math.min(0.4, Math.max(0, -gk.vx * team.dir) * 0.1) + U.clamp((b.z - 1.8) * 0.3, 0, 0.2);
@@ -1293,6 +1454,7 @@
       if (Math.random() < save) {
         const catchP = U.clamp(1.25 - speed / 22 + (gk.stats.handling - 70) * 0.01 - (gk.dive > 0 ? 0.2 : 0), 0.1, 0.9);
         this.sfx('save');
+        this.crowdOoh(lk); // so close! / phew
         if (Math.random() < catchP) { this.gkHold(gk); this.say('Save!', 1); }
         else {
           b.vx = team.dir * U.rand(4, 9);
@@ -1315,17 +1477,17 @@
         const off = Math.abs(b.y - C.H / 2);
         if (Math.abs(off - C.GOAL_W / 2) < 0.2 && b.z < C.GOAL_H) {
           b.x = side === 0 ? 0.05 : C.W - 0.05; b.vx = -b.vx * 0.6; b.vy += U.rand(-2, 2);
-          b.owner = null; this.say('Post!', 1); this.sfx('post'); return;
+          b.owner = null; this.say('Post!', 1); this.sfx('post'); this.crowdOoh(b.lastKick); return;
         }
         if (off < C.GOAL_W / 2 && Math.abs(b.z - C.GOAL_H) < 0.15) {
           b.x = side === 0 ? 0.05 : C.W - 0.05; b.vx = -b.vx * 0.5; b.vz = -Math.abs(b.vz) * 0.5;
-          b.owner = null; this.say('Crossbar!', 1); this.sfx('post'); return;
+          b.owner = null; this.say('Crossbar!', 1); this.sfx('post'); this.crowdOoh(b.lastKick); return;
         }
         const attacking = this.teams.find((t) => t.attackX === side);
         const defending = this.other(attacking);
         if (off < C.GOAL_W / 2 && b.z < C.GOAL_H) { this.goalScored(attacking); return; }
         const lt = b.lastTouch;
-        if (b.lastKick && b.lastKick.type === 'shot' && b.lastKick.team === attacking) this.sfx('ooh');
+        if (b.lastKick && b.lastKick.team === attacking) this.crowdOoh(b.lastKick);
         if (lt && lt.team === defending) {
           const taker = this.cornerTaker(attacking, b.y < C.H / 2 ? 0 : C.H);
           this.restartOrEnd('corner', attacking, taker, side === 0 ? 0.4 : C.W - 0.4, b.y < C.H / 2 ? 0.4 : C.H - 0.4);
@@ -1350,7 +1512,7 @@
     }
 
     restartOrEnd(kind, team, taker, bx, by) {
-      if (!this.fullCourt && !team.isUser) this.endPhase(kind === 'goalkick' ? 'wide' : kind === 'corner' ? 'corner' : 'out', bx);
+      if (!this.fullCourt && !team.isUser && kind !== 'penalty') this.endPhase(kind === 'goalkick' ? 'wide' : kind === 'corner' ? 'corner' : 'out', bx);
       else this.setRestart(kind, team, taker, bx, by);
     }
 
@@ -1382,6 +1544,7 @@
       for (const t of this.teams) {
         const line = AI.offsideLine(this, t);
         for (const p of t.players) {
+          if (p.sentOff) continue;
           p.vx = p.vy = 0; p.stun = p.slide = p.dive = p.lunge = 0;
           p.receiving = null; p.frozen = false; p.plan = null; p.runUntil = 0;
           if (p === taker) continue;
@@ -1433,6 +1596,28 @@
       return wide[0];
     }
 
+    // A shot that's going wide or over is known as soon as it's struck: the crowd's ooh starts
+    // then, with its run-up timed so the groan lands as the ball flies past the post.
+    anticipateMiss() {
+      const b = this.ball, lk = b.lastKick, path = this.ballPath;
+      if (!lk || lk.type !== 'shot' || lk.oohed || !path) return;
+      const gx = lk.team.attackX;
+      for (let i = 0; i < path.length; i++) {
+        const q = path[i];
+        if ((q.x - gx) * (b.x - gx) > 0) continue; // not at the line yet
+        const off = Math.abs(q.y - C.H / 2);
+        if (off > C.GOAL_W / 2 + 0.3 || q.z > C.GOAL_H + 0.2) this.crowdOoh(lk, (i + 1) * 0.1);
+        return;
+      }
+    }
+
+    // The home crowd reacts once per shot that doesn't go in: louder when it was yours.
+    crowdOoh(lk, lead = 0) {
+      if (!lk || lk.type !== 'shot' || lk.oohed) return;
+      lk.oohed = true;
+      this.sfx('ooh', { vol: lk.team.isUser ? 0.85 : 0.4, lead: Math.min(lead, 1.5) });
+    }
+
     goalScored(team) {
       const i = this.idx(team);
       this.score[i]++;
@@ -1444,11 +1629,12 @@
       this.events.push({ type: 'goal', team: i, minute: Math.min(90, this.minute + 1), scorer: lt ? lt.name : '?', og });
       this.state = 'goal';
       this.stateT = 2.6;
+      this.goalRecAt = (this.recCount || 0) + 60; // replay ends a second after it hits the net
       this.goalConceder = this.other(team);
       this.ball.owner = null;
       this.charging = false;
       this.say(og ? 'Own goal!' : 'GOAL!', 2.4);
-      this.sfx('goal');
+      this.sfx(team.isUser ? 'goal' : 'concede');
     }
 
     keepBallInNet() {
@@ -1489,6 +1675,8 @@
   // Sideways acceleration for a pass: right-footers curl it right-to-left (positive), left-footers
   // the other way; more for lofted balls and when played across the body.
   Match.LOFT_BACK = 0.65; // backspin on a lofted pass
+  // Player fields a replay frame records (all a sprite needs).
+  Match.REC_P = ['x', 'y', 'vx', 'vy', 'fx', 'fy', 'anim', 'slide', 'dive', 'diveTotal', 'stun', 'kickAnim', 'jump', 'lunge'];
   Match.curveFor = (p, vx, vy, lofted) => {
     const s = Math.hypot(vx, vy);
     if (s < 1) return 0;

@@ -27,5 +27,13 @@ Teams should move as units through phases (attacking structure, rest defence, co
 recovery runs). Today it's per-player targets from a shared shape; a more explicit team-level
 plan (e.g. phase-of-play states with roles per state) would make movement more coherent.
 
-## Stage 4: season
-38-game league, coins, transfers/upgrades, fan and board happiness.
+## Stage 4: season (league, table, coins, fans, board done)
+Done: league, table, coins, fans, board, squad screen with formations/bench/tactics, Champions
+League. Still to do: something to spend coins on (transfers, player upgrades/training), economy
+tuning once there are costs, in-match substitutions, playable penalty shootouts.
+
+## Narratives
+A storylines layer that reads the season and generates small arcs with choices between rounds:
+rivalries that remember past results, board season objectives, "manager under pressure" and
+"title charge" arcs, player arcs (contract demands, a youngster breaking through, a veteran's last
+season). Choices nudge fans, board, morale and coins.

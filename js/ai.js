@@ -22,10 +22,33 @@
   // Where each role sits inside the block: 0 = back line, 1 = front line.
   const TIER = { LB: 0, CB: 0, RB: 0, DM: 0.3, CM: 0.55, LM: 0.55, RM: 0.55, AM: 0.75, LW: 0.72, RW: 0.72, ST: 1 };
 
+  // Where a slot stands for the squad screen's map, using the same shape rules as in play:
+  // view 'with' = our ball around halfway, 'without' = their ball around halfway.
+  AI.previewSlot = function (style, role, sd, sl, view) {
+    if (role === 'GK') return { d: 0.02, l: 0.5 };
+    let d, l;
+    if (view === 'with') {
+      d = 0.26 + (sd - 0.17) * 0.92 + (role === 'LB' || role === 'RB' ? 0.06 : 0);
+      l = 0.5 + (sl - 0.5) * 1.1;
+    } else {
+      const B = AI.BLOCKS[style.block || 'mid'], comp = style.compact ?? 0.5;
+      let tier = TIER[role] ?? 0.5;
+      const wide = role === 'LW' || role === 'RW';
+      if ((style.fwdDefend || 'help') === 'help') {
+        if (wide) tier = style.block === 'low' ? 0.45 : 0.52;
+        else if (role === 'ST') tier = 0.8;
+        else if (role === 'AM') tier = 0.6;
+      } else if (wide || role === 'ST') tier += 0.35;
+      d = B.line + tier * B.len * (1.2 - 0.4 * comp);
+      l = 0.5 + (sl - 0.5) * B.width * (1.18 - 0.36 * comp);
+    }
+    return { d: U.clamp(d, 0.04, 0.88), l: U.clamp(l, 0.04, 0.96) };
+  };
+
   // Depth (our frame) of the opposing outfield player closest to our goal.
   AI.deepestAttacker = function (m, team) {
     let mn = 1;
-    for (const o of m.other(team).players) if (!o.isGK) mn = Math.min(mn, team.depth(o.x));
+    for (const o of m.other(team).players) if (!o.isGK && !o.sentOff) mn = Math.min(mn, team.depth(o.x));
     return mn;
   };
 
@@ -33,7 +56,7 @@
   // Static attackers don't drag the line back: offside does that job.
   AI.runnerDepth = function (m, team) {
     // Our second-last player: runners already past it are offside and can be left.
-    const ours = team.players.map((q) => team.depth(q.x)).sort((a, b) => a - b);
+    const ours = team.players.filter((q) => !q.sentOff).map((q) => team.depth(q.x)).sort((a, b) => a - b);
     const secondLast = ours[1];
     let mn = 1;
     for (const o of m.other(team).players) {
@@ -47,7 +70,7 @@
   // The actual offside line in this team's attacking frame (second-last opponent), with no
   // halfway floor.
   AI.trueOffsideLine = function (m, team) {
-    const ds = m.other(team).players.map((o) => team.depth(o.x)).sort((a, b) => b - a);
+    const ds = m.other(team).players.filter((o) => !o.sentOff).map((o) => team.depth(o.x)).sort((a, b) => b - a);
     return ds[1];
   };
 
@@ -87,7 +110,7 @@
 
   // Depth (in this team's attacking frame) of the opponents' second-last player: the offside line.
   AI.offsideLine = function (m, team) {
-    const ds = m.other(team).players.map((o) => team.depth(o.x)).sort((a, b) => b - a);
+    const ds = m.other(team).players.filter((o) => !o.sentOff).map((o) => team.depth(o.x)).sort((a, b) => b - a);
     return Math.max(ds[1], 0.5);
   };
 
@@ -171,6 +194,7 @@
 
     const lineD = AI.offsideLine(m, team);
     for (const p of team.players) {
+      if (p.sentOff) { p.stop(); continue; }
       if (p === userCtl && !p.userAuto) continue; // the user drives this one (keeper included)
       if (p.isGK) { AI.keeper(m, p, dt); continue; }
       if (p.lunge > 0) continue;
@@ -211,10 +235,9 @@
   };
 
   // Do this team's forwards drop back on defence ('help') or stay up for the counter ('high')?
-  // The user picks it; CPU teams by style (press teams keep their front line high).
+  // Part of each team's tactics (yours are set on the squad screen).
   AI.fwdDefend = function (team) {
-    if (team.isUser) return PP.settings.fwdDefend || 'help';
-    return team.style.fwdDefend || (team.block === 'high' ? 'high' : 'help');
+    return team.style.fwdDefend || (team.style.block === 'high' ? 'high' : 'help');
   };
 
   // How well a forward times his runs: reads the passer, holds the line, checks a run that's
@@ -230,7 +253,10 @@
     const ballD = team.depth(b.x), bl = b.y / C.H;
     let d, l, sprint = false;
 
-    if (m.state === 'restart' && r.kind === 'kickoff') {
+    if (m.state === 'restart' && r.kind === 'penalty') {
+      const atk = r.team, d = 1 - (C.BOX_D + 1.5 + (p.idx % 3) * 1.6) / C.W;
+      return { ...atk.toWorld(d, U.clamp(0.22 + ((p.idx * 7 + (team === atk ? 0 : 3)) % 11) * 0.056, 0.2, 0.8)), sprint: false };
+    } else if (m.state === 'restart' && r.kind === 'kickoff') {
       if (p === r.partner) return { x: p.x, y: p.y, sprint: false };
       d = Math.min(s.d * 0.72, 0.45); l = s.l;
     } else if (m.state === 'restart' && r.kind === 'corner') {
@@ -336,6 +362,17 @@
       if (dd < 7) { const n = dd > 0.1 ? { x: dx / dd, y: dy / dd } : { x: -team.dir, y: 0 }; t.x = o.x + n.x * 7; t.y = U.clamp(o.y + n.y * 7, 1, C.H - 1); }
     }
 
+    // Our throw: the two nearest come short to offer, one down the line, one infield.
+    if (m.state === 'restart' && r.kind === 'throw' && r.team === team && p !== r.taker && !p.isGK) {
+      const near = team.outfield().filter((q) => q !== r.taker)
+        .sort((a, c) => U.dist(a.x, a.y, b.x, b.y) - U.dist(c.x, c.y, b.x, b.y)).slice(0, 2);
+      const k = near.indexOf(p);
+      if (k >= 0) {
+        const side = b.y < C.H / 2 ? 1 : -1, wob = Math.sin(m.time * 1.3 + p.idx) * 1.5;
+        const off = k === 0 ? { x: team.dir * (7 + wob), y: 4 } : { x: -team.dir * 3, y: 10 + wob };
+        return { x: U.clamp(b.x + off.x, 2, C.W - 2), y: U.clamp(b.y + side * off.y, 2, C.H - 2), sprint: true };
+      }
+    }
     if (m.state === 'restart' && r.team !== team) {
       const R = r.kind === 'throw' ? 3 : r.kind === 'phase' ? 14 : 9.2;
       const dx = t.x - b.x, dy = t.y - b.y, dd = Math.hypot(dx, dy);
@@ -421,7 +458,9 @@
     if (m.state === 'restart') {
       p.stop();
       const r = m.restart;
-      const delay = r.kind === 'gk' ? 1.4 : r.kind === 'kickoff' ? 0.8 : 1.1;
+      const delay = r.kind === 'gk' ? 1.4 : r.kind === 'kickoff' ? 0.8 : r.kind === 'throw' ? 1.6 : r.kind === 'penalty' ? 2.2 : 1.1;
+      // A throw waits (up to a few seconds) for someone to come free.
+      if (r.kind === 'throw' && r.t >= delay && r.t < 4 && !AI.throwIn(m, p, true)) return;
       if (r.t >= delay) AI.restartKick(m, p, r);
       return;
     }
@@ -570,7 +609,13 @@
       const q = inBox.length ? U.pick(inBox) : null;
       if (q) { m.passTo(p, q, true); return; }
     }
-    let opts = AI.passOptions(m, p, r.kind === 'throw' ? 22 : 50);
+    if (r.kind === 'throw') { AI.throwIn(m, p); return; }
+    if (r.kind === 'penalty') { // pick a side (or, now and then, down the middle) and hit it
+      const aimY = Math.random() < 0.15 ? U.rand(-0.15, 0.15) : (Math.random() < 0.5 ? -1 : 1) * U.rand(0.45, 0.95);
+      m.shoot(p, aimY, U.rand(0.5, 0.85));
+      return;
+    }
+    let opts = AI.passOptions(m, p, 50);
     if (r.kind === 'gk') {
       const roll = opts.find((o) => !o.lofted && o.lane > 1 && U.dist(p.x, p.y, o.target.x, o.target.y) < 28);
       if (roll && Math.random() < 0.7) { m.passTo(p, roll.target, false); return; } // roll it out
@@ -587,12 +632,45 @@
     m.kickTo(p, t.x, t.y, true, 'clear', null);
   };
 
+  // A real throw-in: to an open team-mate's feet with a clear lane, otherwise down the line
+  // into space ahead. Never just lobbed at whoever is nearest.
+  // (check = true: only report whether someone is free.)
+  AI.throwIn = function (m, p, check = false) {
+    const team = p.team, opp = m.other(team), b = m.ball;
+    let best = null, bs = -1e9, bp = null;
+    for (const q of team.players) {
+      if (q === p || q.isGK || q.isDown()) continue;
+      // Throw to his feet (or a step ahead of him): who gets there first?
+      for (const lead of [0, 2.5]) {
+        const P = { x: q.x + team.dir * lead, y: U.clamp(q.y, 3.5, C.H - 3.5) };
+        const d = U.dist(b.x, b.y, P.x, P.y);
+        if (d < 4 || d > 22) continue;
+        const T = 0.3 + d / 24, mine = U.dist(q.x, q.y, P.x, P.y) / q.topSpeed(true) + 0.15;
+        let theirs = 9;
+        for (const o of opp.players) theirs = Math.min(theirs, Math.max(0, U.dist(o.x, o.y, P.x, P.y) - 1) / (o.topSpeed(true) * 0.9));
+        const margin = theirs - Math.max(T, mine);
+        if (margin < 0.25) continue;
+        const s = Math.min(margin, 1.5) * 2 + (team.depth(P.x) - team.depth(b.x)) * 6 - d * 0.04 - lead * 0.1 + U.rand(-0.3, 0.3);
+        if (s > bs) { bs = s; best = q; bp = P; }
+      }
+    }
+    if (check) return !!best;
+    let tx, ty;
+    if (best) { tx = bp.x; ty = bp.y; }
+    else { tx = b.x - team.dir * U.rand(6, 10); ty = b.y < C.H / 2 ? U.rand(6, 9) : C.H - U.rand(6, 9); } // nobody free: back and infield
+    m.throwBall(p, U.clamp(tx, 2, C.W - 2), ty, best);
+  };
+
   // ---------- goalkeeper ----------
 
   AI.keeper = function (m, gk, dt) {
     const team = gk.team, b = m.ball, gx = team.ownX, gy = C.H / 2;
     if (b.owner === gk) { AI.carrier(m, gk, dt); return; }
     if (gk.isDown()) return;
+    if (m.state === 'restart' && m.restart.kind === 'penalty' && m.restart.team !== team) { // on his line
+      gk.steer(gx + team.dir * 0.3, gy, false, 0.5); gk.face(b.x, b.y);
+      return;
+    }
 
     // Shot or ball heading at goal: get across, dive if needed.
     const fromOpp = b.lastKick && b.lastKick.team !== team;

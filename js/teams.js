@@ -15,6 +15,26 @@
       ['DM', 0.33, 0.5], ['CM', 0.44, 0.3], ['CM', 0.44, 0.7],
       ['LW', 0.63, 0.14], ['ST', 0.67, 0.5], ['RW', 0.63, 0.86],
     ],
+    '4-1-4-1': [
+      ['GK', 0, 0.5],
+      ['LB', 0.2, 0.13], ['CB', 0.16, 0.38], ['CB', 0.16, 0.62], ['RB', 0.2, 0.87],
+      ['DM', 0.31, 0.5],
+      ['LM', 0.47, 0.14], ['CM', 0.45, 0.36], ['CM', 0.45, 0.64], ['RM', 0.47, 0.86],
+      ['ST', 0.66, 0.5],
+    ],
+    '4-3-1-2': [
+      ['GK', 0, 0.5],
+      ['LB', 0.2, 0.13], ['CB', 0.16, 0.38], ['CB', 0.16, 0.62], ['RB', 0.2, 0.87],
+      ['DM', 0.32, 0.5], ['CM', 0.42, 0.28], ['CM', 0.42, 0.72],
+      ['AM', 0.54, 0.5],
+      ['ST', 0.65, 0.38], ['ST', 0.65, 0.62],
+    ],
+    '3-4-3': [
+      ['GK', 0, 0.5],
+      ['CB', 0.16, 0.26], ['CB', 0.15, 0.5], ['CB', 0.16, 0.74],
+      ['LM', 0.4, 0.1], ['CM', 0.38, 0.38], ['CM', 0.38, 0.62], ['RM', 0.4, 0.9],
+      ['LW', 0.62, 0.18], ['ST', 0.67, 0.5], ['RW', 0.62, 0.82],
+    ],
     '4-2-3-1': [
       ['GK', 0, 0.5],
       ['LB', 0.2, 0.13], ['CB', 0.16, 0.38], ['CB', 0.16, 0.62], ['RB', 0.2, 0.87],
@@ -87,23 +107,59 @@
     return best;
   };
 
-  PP.makeSquad = function (formation, rating) {
-    const used = new Set();
-    return PP.FORMATIONS[formation].map((slot, i) => {
-      let name;
-      do { name = makeName(); } while (used.has(name));
-      used.add(name);
-      const stats = makeStats(slot[0], rating + U.rand(-4, 4));
-      return {
-        name,
-        num: i === 0 ? 1 : [2, 5, 4, 3, 6, 8, 10, 7, 9, 11][i - 1],
-        stats,
-        foot: Math.random() < 0.25 ? 'L' : 'R',
-        trait: PP.traitFor(slot[0], stats),
-        look: { skin: U.pick(SKIN), hair: U.pick(HAIR) },
-      };
-    });
+  function makePlayer(role, rating, num, used) {
+    let name;
+    do { name = makeName(); } while (used.has(name));
+    used.add(name);
+    const stats = makeStats(role, rating + U.rand(-4, 4));
+    return {
+      name, num, stats, pos: role, // pos = natural position
+      foot: Math.random() < 0.25 ? 'L' : 'R',
+      trait: PP.traitFor(role, stats),
+      look: { skin: U.pick(SKIN), hair: U.pick(HAIR) },
+    };
+  }
+
+  PP.makeSquad = function (formation, rating, used = new Set()) {
+    return PP.FORMATIONS[formation].map((slot, i) =>
+      makePlayer(slot[0], rating, i === 0 ? 1 : [2, 5, 4, 3, 6, 8, 10, 7, 9, 11][i - 1], used));
   };
+  // Seven substitutes: a keeper and cover across the pitch, a little weaker than the XI.
+  const BENCH_ROLES = ['GK', 'CB', 'LB', 'DM', 'CM', 'RW', 'ST'];
+  PP.makeBench = function (rating, squad) {
+    const used = new Set(squad.map((p) => p.name));
+    return BENCH_ROLES.map((r, i) => makePlayer(r, rating - 3, [13, 15, 12, 16, 14, 17, 19][i], used));
+  };
+  // Older saves / squads without natural positions or a bench.
+  PP.ensureBench = (def) => {
+    const form = PP.FORMATIONS[def.formation];
+    def.squad.forEach((pl, i) => { if (!pl.pos) pl.pos = form[i][0]; });
+    if (!def.bench) def.bench = PP.makeBench(def.rating, def.squad);
+    return def.bench;
+  };
+
+  // Re-arrange a def's XI into `formation`: each slot gets the best-suited player left
+  // (keeper first, then the slots in order).
+  PP.setFormation = (def, formation) => {
+    const form = PP.FORMATIONS[formation], pool = def.squad.slice(), out = [];
+    const order = form.map((_, i) => i).sort((a, b) => (form[a][0] === 'GK' ? -1 : form[b][0] === 'GK' ? 1 : 0));
+    for (const i of order) {
+      const role = form[i][0];
+      let bi = 0, bs = -1;
+      pool.forEach((pl, j) => { const sc = PP.fit(pl.pos || role, role) * 100 + PP.playerRating(role, pl.stats) * 0.01; if (sc > bs) { bs = sc; bi = j; } });
+      out[i] = pool.splice(bi, 1)[0];
+    }
+    def.squad = out;
+    def.formation = formation;
+  };
+
+  // How well a player suits a slot: 1 = natural position, less for a neighbouring one.
+  const NEAR = {
+    GK: [], CB: ['DM', 'LB', 'RB'], LB: ['RB', 'LM', 'CB'], RB: ['LB', 'RM', 'CB'], DM: ['CM', 'CB'],
+    CM: ['DM', 'AM', 'LM', 'RM'], LM: ['LW', 'RM', 'CM', 'LB'], RM: ['RW', 'LM', 'CM', 'RB'],
+    AM: ['CM', 'ST', 'LW', 'RW'], LW: ['RW', 'LM', 'AM', 'ST'], RW: ['LW', 'RM', 'AM', 'ST'], ST: ['AM', 'LW', 'RW'],
+  };
+  PP.fit = (pos, role) => (pos === role ? 1 : (NEAR[pos] || []).includes(role) ? 0.9 : pos === 'GK' || role === 'GK' ? 0.3 : 0.75);
 
   PP.TEAM_DEFS = [
     {
@@ -135,12 +191,15 @@
   PP.teamRatings = function (def) {
     const form = PP.FORMATIONS[def.formation];
     const g = { att: [], mid: [], def: [], gk: [] };
-    def.squad.forEach((pl, i) => { const role = form[i][0]; g[ROLE_GROUP[role]].push(PP.playerRating(role, pl.stats)); });
+    def.squad.forEach((pl, i) => {
+      const role = form[i][0], fit = pl.pos ? 1 - (1 - PP.fit(pl.pos, role)) * 0.5 : 1;
+      g[ROLE_GROUP[role]].push(PP.playerRating(role, pl.stats) * fit);
+    });
     const mean = (a) => a.reduce((x, y) => x + y, 0) / a.length;
     const raw = { att: mean(g.att), mid: mean(g.mid), def: mean(g.def) * 0.75 + mean(g.gk) * 0.25, gk: mean(g.gk) };
     return { raw, att: PP.stars(raw.att), mid: PP.stars(raw.mid), def: PP.stars(raw.def), gk: PP.stars(raw.gk) };
   };
-  PP.ensureSquad = (def) => { if (!def.squad) def.squad = PP.makeSquad(def.formation, def.rating); return def.squad; };
+  PP.ensureSquad = (def) => { if (!def.squad) def.squad = PP.makeSquad(def.formation, def.rating); PP.ensureBench(def); return def.squad; };
 
   class Team {
     constructor(def, dir, isUser, match) {
@@ -166,7 +225,7 @@
     toWorld(d, l) { return { x: this.dir === 1 ? d * C.W : C.W - d * C.W, y: l * C.H }; }
     depth(x) { return this.dir === 1 ? x / C.W : (C.W - x) / C.W; }
     get gk() { return this.players[0]; }
-    outfield() { return this.players.filter((p) => !p.isGK); }
+    outfield() { return this.players.filter((p) => !p.isGK && !p.sentOff); }
   }
   PP.Team = Team;
 })();

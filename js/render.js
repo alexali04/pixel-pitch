@@ -7,8 +7,8 @@
   const PERSP = 0.007;   // fractional scale change per metre of depth
   const TY = 4;          // pitch texture rows per metre (<= on-screen rows per metre, so no row is skipped)
 
-  // 10x17 player sprites, facing right (mirrored for left). Built from a top (head+torso,
-  // 11 rows), shorts (2 rows) and legs (4 rows).
+  // 10x19 player sprites, facing right (mirrored for left). Built from a top (head+torso,
+  // 11 rows), shorts (2 rows) and legs (6 rows).
   // H hair, S skin, s skin shade, E eye, T shirt, t shirt shade, P shorts, K socks, B boots.
   const HEAD = ['...HHH....', '..HHHHH...', '..HHSSS...', '..HSSES...', '...sSSS...'];
   const HEAD_LEAN = HEAD.map((r) => '.' + r.slice(0, 9)); // head forward when running
@@ -18,24 +18,28 @@
     armB: ['..tTTTT...', 'tttTTTTT..', 'S.TTTTTT..', '.tTTTTTS..', '..TTTTTS..', '..TTTTT...'], // near arm back
     armsUp: ['S.tTTTT.S.', 'StTTTTTTS.', '.tTTTTTT..', '.tTTTTTT..', '..TTTTT...', '..TTTTT...'], // jumping to head it
   };
+  // Arms: shirt pixels outside the body columns (2-6) are sleeves (A, shaded a), so a kit can
+  // have different-coloured sleeves.
+  for (const k of Object.keys(TORSO)) TORSO[k] = TORSO[k].map((row) => [...row].map((ch, i) => (i < 2 || i > 6 ? (ch === 'T' ? 'A' : ch === 't' ? 'a' : ch) : ch)).join(''));
   const SHORTS = { idle: ['..PPPPP...', '..PP.PP...'], wide: ['..PPPPP...', '.PPP.PPP..'], knee: ['..PPPPP...', '..PP.PPP..'] };
+  // Legs are 6 rows (thigh, knee, two of shin, ankle, boot) so strides and kicks read clearly.
   const LEGS = {
-    stand:  ['..SS.SS...', '..KK.KK...', '..KK.KK...', '..BB.BB...'],
-    stride: ['.SS...SS..', '.KK....KK.', 'KK......KK', 'BB......BB'], // both legs reaching
-    kneeUp: ['..SS..SSS.', '..KK...KK.', '..KK...BB.', '..BB......'], // front knee driving up
-    heelUp: ['.SS..SS...', 'KK...KK...', 'BB...KK...', '.....BB...'], // back heel kicking up
-    lunge:  ['..SS.SS...', '..KK..KK..', '..KK...KK.', '..BB....BB'], // leg stuck out to tackle
-    kick:   ['..SS.SSS..', '..KK...SKK', '..KK.....B', '..BB......'], // striking the ball
+    stand:  ['..SS.SS...', '..SS.SS...', '..KK.KK...', '..KK.KK...', '..KK.KK...', '..BB.BB...'],
+    stride: ['..SS..SS..', '.SS....SS.', '.KK....KK.', 'KK......KK', 'KK......KK', 'BB......BB'], // both legs reaching
+    kneeUp: ['..SS.SSS..', '..SS...SS.', '..KK...KK.', '..KK..KK..', '..KK......', '..BB......'], // front knee driving up
+    heelUp: ['..SS.SS...', '.SS..SS...', 'KK...KK...', 'KK...KK...', 'BB...KK...', '.....BB...'], // back heel kicking up
+    lunge:  ['..SS.SS...', '..SS..SS..', '..KK...SS.', '..KK....KK', '..KK.....K', '..BB.....B'], // leg stuck out to tackle
+    kick:   ['..SS.SSSS.', '..SS....SK', '..KK.....B', '..KK......', '..KK......', '..BB......'], // striking the ball
   };
   // Run cycle: stride, drive the knee (airborne, body up 1px), stride, kick the heel.
   // Run cycle legs: near leg in kit colours (S/K), far leg shaded (q/k) so the stride reads.
   Object.assign(LEGS, {
-    r0: ['.qq...SS..', '.kk....KK.', 'kk......KK', 'BB......BB'], // near leg reaching forward
-    r1: ['...SSqq...', '...KK.kkk.', '...KK.....', '...BB.....'], // planted; far knee drives through
-    r2: ['..qq.SS...', '.kk...KK..', 'BB.....KK.', '.......BB.'], // airborne
-    r3: ['.SS...qq..', '.KK....kk.', 'KK......kk', 'BB......BB'], // far leg reaching forward
-    r4: ['...qqSS...', '...kk.KKK.', '...kk.....', '...BB.....'], // planted; near knee drives through
-    r5: ['..SS.qq...', '.KK...kk..', 'BB.....kk.', '.......BB.'], // airborne
+    r0: ['..qq.SS...', '.qq...SS..', '.kk....KK.', 'kk.....KK.', 'kk......KK', 'BB......BB'], // near leg reaching forward
+    r1: ['...SSqqq..', '...SS..qq.', '...KK..kk.', '...KK.kk..', '...KK.....', '...BB.....'], // planted; far knee drives through
+    r2: ['..qq.SS...', '.qq...SS..', '.kk...KK..', 'kk.....KK.', 'B......KK.', '.......BB.'], // airborne
+    r3: ['..SS.qq...', '.SS...qq..', '.KK....kk.', 'KK.....kk.', 'KK......kk', 'BB......BB'], // far leg reaching forward
+    r4: ['...qqSSS..', '...qq..SS.', '...kk..KK.', '...kk.KK..', '...kk.....', '...BB.....'], // planted; near knee drives through
+    r5: ['..SS.qq...', '.SS...qq..', '.KK...kk..', 'KK.....kk.', 'B......kk.', '.......BB.'], // airborne
   });
   const RUN = [
     { torso: 'armB', shorts: 'wide', legs: 'r0', bob: 0 },
@@ -211,6 +215,7 @@
       // Shadows.
       g.fillStyle = 'rgba(0,0,0,0.28)';
       for (const p of m.players) {
+        if (p.sentOff) continue;
         const x = this.sx(p.rx, p.ry), y = this.sy(p.ry);
         if (p.slide > 0 || p.dive > 0 || p.stun > 0.25) { g.fillRect(x - 7, y - 1, 15, 3); continue; }
         g.fillRect(x - 3, y - 1, 8, 3); g.fillRect(x - 4, y, 10, 1);
@@ -223,7 +228,7 @@
       g.fillStyle = 'rgba(0,0,0,0.28)';
 
       // Depth-sorted sprites.
-      const list = m.players.map((p) => ({ y: p.ry, p }));
+      const list = m.players.filter((p) => !p.sentOff).map((p) => ({ y: p.ry, p }));
       list.push({ y: b.ry + 0.05, ball: true });
       list.sort((a, c) => a.y - c.y);
       for (const e of list) {
@@ -253,6 +258,18 @@
       }
       this.drawPopups(m);
       this.drawRadar(m);
+      if (m.state === 'replay') this.drawReplayTag();
+    }
+
+    // Slow-motion replay: letterbox bars, a blinking REPLAY tag and how to skip.
+    drawReplayTag() {
+      const g = this.ctx, W = C.VIEW_W, H = C.VIEW_H;
+      g.fillStyle = 'rgba(0,0,0,0.55)';
+      g.fillRect(0, 0, W, 14); g.fillRect(0, H - 14, W, 14);
+      g.font = '8px monospace'; g.textAlign = 'left';
+      if (Math.floor(this.t * 2) % 2) { g.fillStyle = '#e4572e'; g.fillRect(8, 4, 5, 5); }
+      g.fillStyle = '#fff'; g.fillText('REPLAY', 17, 10);
+      g.textAlign = 'right'; g.fillStyle = '#cfd8d6'; g.fillText('J / Space / click: skip', W - 8, H - 4);
     }
 
     // Dashed line from the passer to where the pass will go while a pass button is held.
@@ -384,7 +401,8 @@
       const g = this.ctx;
       const kit = p.isGK ? p.team.gkKit : p.team.kit;
       const x = this.sx(p.rx, p.ry), y = this.sy(p.ry);
-      const pal = { H: p.look.hair, S: p.look.skin, s: shade(p.look.skin), q: shade(p.look.skin), E: '#1a1a1a', T: kit.shirt, t: kit.shade, P: kit.shorts, K: kit.socks, k: shade(kit.socks), B: '#151515' };
+      const sl = kit.sleeves || kit.shirt;
+      const pal = { H: p.look.hair, S: p.look.skin, s: shade(p.look.skin), q: shade(p.look.skin), E: '#1a1a1a', T: kit.shirt, t: kit.shade, A: sl, a: kit.sleeves ? shade(sl) : kit.shade, P: kit.shorts, K: kit.socks, k: shade(kit.socks), B: '#151515' };
 
       if (p.slide > 0 || p.dive > 0 || p.stun > 0.25) { this.drawLying(p, x, y, pal); return; }
       const left = p.fx < -0.1 || (Math.abs(p.fx) <= 0.1 && p.team.dir < 0);
@@ -452,18 +470,18 @@
       if (!p) return;
       const x = this.sx(p.rx, p.ry), y = this.sy(p.ry);
       const bob = Math.floor(this.t * 4) % 2;
-      const top = y - 24 + bob;
+      const top = y - 26 + bob;
       g.fillStyle = '#000'; g.fillRect(x - 3, top - 1, 7, 1);
       g.fillStyle = '#ffd23f';
       g.fillRect(x - 2, top, 5, 1); g.fillRect(x - 1, top + 1, 3, 1); g.fillRect(x, top + 2, 1, 1);
       this.ring(x + 1, y, 'rgba(255,210,63,0.85)');
       if (m.charging) {
-        g.fillStyle = '#000'; g.fillRect(x - 8, y - 30, 17, 4);
+        g.fillStyle = '#000'; g.fillRect(x - 8, y - 32, 17, 4);
         const w = Math.max(1, Math.round(15 * m.charge));
         const isShot = m.chargeKind === 'shot' || (m.preview && m.preview.shot);
         const ramp = isShot ? ['#a8c686', '#f3a712', '#e4572e'] : ['#9fd3c7', '#5fa8d3', '#3a6ea5'];
         g.fillStyle = ramp[m.charge > 0.8 ? 2 : m.charge > 0.45 ? 1 : 0];
-        g.fillRect(x - 7, y - 29, w, 2);
+        g.fillRect(x - 7, y - 31, w, 2);
       }
     }
 
@@ -477,6 +495,7 @@
       g.fillRect(ox, oy + Math.round(h / 2 - (C.GOAL_W * s) / 2), 1, Math.round(C.GOAL_W * s));
       g.fillRect(ox + w - 1, oy + Math.round(h / 2 - (C.GOAL_W * s) / 2), 1, Math.round(C.GOAL_W * s));
       for (const p of m.players) {
+        if (p.sentOff) continue;
         g.fillStyle = p === m.controlled ? '#ffd23f' : p.isGK ? p.team.gkKit.shirt : p.team.kit.shirt;
         g.fillRect(ox + Math.round(p.x * s) - 1, oy + Math.round(p.y * s) - 1, 2, 2);
       }
