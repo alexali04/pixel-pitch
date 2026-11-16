@@ -12,6 +12,10 @@ python3 serve.py
 
 then visit http://localhost:8765.
 
+**On a phone or tablet:** run `python3 serve.py --lan` and open the address it prints (your
+computer's IP, port 8765) in Safari/Chrome on the same Wi-Fi. Play in landscape. While it runs,
+anyone on that network can open the game.
+
 ## Controls
 
 | | Attacking | Defending |
@@ -43,6 +47,25 @@ you can stop it at any angle. A dashed line shows where the ball will go, and a 
 teammate who will get there first; they run onto it. Keepers can't handle back-passes.
 
 Keepers holding the ball: **J** rolls it out, **K** / **Space** kicks it.
+
+### Touch (phones and tablets)
+
+Every gesture can start anywhere on the screen.
+
+| Gesture | With the ball | Without it |
+|---|---|---|
+| Pull back (drag away from the goal you're attacking), let go | slingshot: the ball goes the opposite way. Pull length = power; up to ~60% of a full pull it's a ground pass, longer is lofted (and higher). Once pulling you can swing round to any angle, even to play it backwards. Aimed at the goal in range = shot | |
+| Second finger down while pulling | keeps it on the ground at any power | |
+| Bring the finger back to the start, let go | cancel | |
+| Drag forwards (or square) | dribble that way, like a joystick centred where your finger landed; further = sprint | run that way; a quick swipe = slide tackle |
+| Tap | | tackle / header / go for a loose ball; tap a team-mate to switch to him |
+| II button (top left) | pause | pause |
+
+A full pull is about a sixth of the screen width. Set pieces, throw-ins, free kicks and
+penalties work the same way. The gestures feed the same aim/power logic as the keyboard and
+mouse (`js/touch.js`). On phones the view widens to the screen's shape, so you see more of the
+pitch side to side. iPhone Safari can't hide its own bars for a web page: for true fullscreen,
+use Share → Add to Home Screen and open it from there (or aA → Hide Toolbar in Safari).
 
 ## Smoothness controls
 
@@ -142,7 +165,10 @@ slide, and less likely from good tacklers (and much less likely in a defender's 
 gives a free kick where it happened, or a **penalty** in the box: everyone else waits outside the
 box, the keeper stays on his line and has to guess a side. Reckless challenges (sliding in from
 behind above all) get a yellow card; a second yellow is a red and the player is sent off, leaving
-his side a man short. Cards are listed at half-time and full time.
+his side a man short. Cards are listed at half-time and full time. Free kicks within ~30 m of goal are **direct**: the defenders form
+a 3-4 man wall 9.15 m away (shading the near post) and you can't take it until it's set (about
+2 s); Space shoots it with dip to get up and over, and the wall can block it. CPU sides have a
+go about two times in three.
 
 ## Presentation
 
@@ -155,7 +181,7 @@ his side a man short. Cards are listed at half-time and full time.
   woodwork, and for a shot that's going wide it starts as the shot is struck so the groan lands as
   it passes the post (louder for your shots); outrage when your player is fouled. Reactions start
   at hand-picked cue points in the recordings. The crowd falls silent on pause and half-time. Everything else (kicks, whistles, menu music, clicky buttons) is
-  synthesized. M mutes all.
+  synthesized. M mutes all; the Sound card (title screen and pause menu) has Master, Music, Crowd and Effects sliders and the menu-music toggle, saved between visits.
 
 ## Credits
 
@@ -205,6 +231,7 @@ The pause screen (P) shows your XI's attributes, foot and traits.
 - `js/teams.js` – formations, team definitions, generated squads and stats
 - `js/ai.js` – team shape, pressing, ball-carrier decisions, goalkeepers
 - `js/match.js` – match rules, restarts, kicks, tackles, user input handling
+- `js/touch.js` – touch gestures (drag to kick, hold to run, taps) turned into the same inputs
 - `js/render.js` – pixel renderer (pre-rendered stadium, sprites, radar)
 - `js/audio.js` – synthesized sound effects (Web Audio, no asset files)
 - `js/main.js` – screens and the fixed-timestep loop

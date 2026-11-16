@@ -69,8 +69,9 @@
     }
   }
 
-  // One step in the air. Backspin gives lift that grows with speed (so a floated ball climbs,
-  // hangs, then drops steeply as it slows) plus extra drag. Returns the spin before the step.
+  // One step in the air. Backspin (back > 0) gives lift that grows with speed (so a floated ball
+  // climbs, hangs, then drops steeply as it slows); topspin (back < 0) pulls it down (a dipping
+  // chip: a flat climb and a sudden drop). Either adds drag. Returns the spin before the step.
   Ball.LIFT = 0.3; Ball.SPIN_DRAG = 0.6; Ball.SPIN_DECAY = 0.3;
   Ball.airStep = (b, dt) => {
     const bk = b.back || 0;
@@ -79,7 +80,7 @@
       b.back = bk * Math.exp(-Ball.SPIN_DECAY * dt);
     }
     b.vz -= C.G * dt;
-    const f = Math.exp(-(C.AIR_K + Ball.SPIN_DRAG * bk) * dt);
+    const f = Math.exp(-(C.AIR_K + Ball.SPIN_DRAG * Math.abs(bk)) * dt); // spin either way costs speed
     b.vx *= f; b.vy *= f;
     b.x += b.vx * dt; b.y += b.vy * dt; b.z += b.vz * dt;
     return bk;

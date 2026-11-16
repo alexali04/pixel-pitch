@@ -5,7 +5,7 @@
   const hud = document.getElementById('hud');
   const overlay = document.getElementById('overlay');
   const $ = (id) => document.getElementById(id);
-  const R = new PP.Renderer(cv);
+  const R = (PP.R = new PP.Renderer(cv)); // PP.R: handy for debugging
   I.init();
   // Locked-mouse aiming: grab the pointer during play, let it go on every menu.
   const lockMode = () => PP.settings.aim === 'mouselock';
@@ -31,12 +31,16 @@
   let lastHud = '';
 
   function fit() {
-    const s = Math.max(1, Math.min(innerWidth / C.VIEW_W, innerHeight / C.VIEW_H));
+    // Phones: widen the view to the screen's shape so the pitch fills it (more pitch side to side).
+    if (matchMedia('(pointer: coarse)').matches || I.usedTouch) {
+      R.setWidth(Math.round(U.clamp((C.VIEW_H * innerWidth) / innerHeight, 560, 820)));
+    }
+    const s = Math.max(0.3, Math.min(innerWidth / C.VIEW_W, innerHeight / C.VIEW_H)); // phones can be smaller than 1x
     wrap.style.width = C.VIEW_W * s + 'px';
     wrap.style.height = C.VIEW_H * s + 'px';
-    wrap.style.setProperty('--s', ((s * C.VIEW_W) / 512).toFixed(3)); // HUD sized as at 512px
+    wrap.style.setProperty('--s', ((s * C.VIEW_H) / 288).toFixed(3)); // HUD sized as at 512x288
   }
-  addEventListener('resize', fit);
+  addEventListener('resize', () => { fit(); setTimeout(fit, 350); }); // iOS reports the new size late after a rotation
   fit();
 
   const CONTROLS = `
@@ -47,6 +51,15 @@
       <span class="h">Defend</span><span><kbd>Space</kbd> tackle &nbsp;<kbd>K</kbd> slide</span><span><kbd>J</kbd> switch</span>
       <span class="h">Game</span><span><kbd>P</kbd> pause &nbsp;<kbd>R</kbd> restart &nbsp;<kbd>M</kbd> mute</span><span>aim with direction keys</span>
     </div>`;
+
+  const TOUCH_CONTROLS = `
+    <div class="controls">
+      <span class="h">Pass / shoot</span><span>pull back anywhere, let go</span><span>further = harder, long = lofted</span>
+      <span class="h">On the ground</span><span>2nd finger down while pulling</span><span>back to the start = cancel</span>
+      <span class="h">Dribble / run</span><span>drag forwards (a joystick)</span><span>further = sprint</span>
+      <span class="h">Defend</span><span>drag = run, tap = tackle</span><span>swipe = slide, tap a mate = switch</span>
+    </div>`;
+  const controlsHelp = () => (I.usedTouch || matchMedia('(pointer: coarse)').matches ? TOUCH_CONTROLS : CONTROLS);
 
   // Clicky buttons.
   overlay.addEventListener('click', (e) => { if (e.target.closest('.btn, tr.opt, tr.pick, .slot, .benchp')) PP.Sound.play('click'); });
@@ -59,6 +72,17 @@
     if (btn && onClick) btn.addEventListener('click', onClick);
   }
   function hide() { overlay.hidden = true; }
+  // Touch screens: an on-screen pause button (no Esc / P key), and fullscreen where allowed.
+  let touchFitted = false;
+  const touchDevice = () => I.usedTouch || matchMedia('(pointer: coarse)').matches;
+  $('pauseBtn').addEventListener('click', (e) => { e.stopPropagation(); if (screen === 'match') pause(); });
+  I.onTouch = () => {
+    if (!touchFitted) { touchFitted = true; fit(); }
+    const d = document.documentElement, fs = d.requestFullscreen || d.webkitRequestFullscreen;
+    if (fs && !document.fullscreenElement && !document.webkitFullscreenElement && matchMedia('(pointer: coarse)').matches) {
+      try { const r = fs.call(d); if (r && r.catch) r.catch(() => {}); } catch (e) { /* not allowed (iPhone) */ }
+    }
+  };
 
   const starsTxt = (n) => '★'.repeat(Math.floor(n)) + (n % 1 ? '½' : '');
   const bar = (v, col) => `<span class="meter"><i style="width:${v}%;background:${col}"></i></span>`;
@@ -70,7 +94,7 @@
     PP.Sound.crowdOff();
     hud.hidden = true;
     const s = L.s, cont = s && !s.over;
-    show(`<h1>PIXEL PITCH</h1>
+    show(`<h1>PIXEL PITCH</h1><p class="hint" style="margin-top:-0.6em">${PP.VERSION}</p>
       <p>${cont ? `${L.user().name} · season ${s.season} · round ${s.round + 1} of ${s.fixtures.length}` : 'A 38-game Premier League season.'}</p>
       <button class="btn" id="seasonBtn">${cont ? 'Continue season' : s ? 'Next season' : 'Start season'} (Enter)</button>
       <button class="btn toggle" id="friendlyBtn" style="margin-left:1em">Friendly</button>
@@ -78,9 +102,9 @@
       ${s ? '<button class="btn toggle" id="resetBtn" style="margin-left:1em">Start over</button>' : ''}
       <p style="margin-top:1.2em"><button class="btn toggle" id="fcBtn">Full court: ${settings.fullCourt ? 'ON' : 'OFF'} (F)</button>
       <button class="btn toggle" id="smTitle" style="margin-left:1em">Smoothness controls</button>
-      <button class="btn toggle" id="musBtn" style="margin-left:1em">Music: ${PP.Sound.wantMusic ? 'ON' : 'OFF'}</button></p>
+      <button class="btn toggle" id="musBtn" style="margin-left:1em">Sound</button></p>
       <p class="hint">${settings.fullCourt ? 'Continuous 11v11: you defend too.' : 'You play your attacks and defend turnovers; you attack right to left.'}</p>
-      ${CONTROLS}`);
+      ${controlsHelp()}`);
     enterAction = seasonEntry;
     $('seasonBtn').addEventListener('click', seasonEntry);
     $('friendlyBtn').addEventListener('click', friendlyScreen);
@@ -90,7 +114,7 @@
     });
     $('fcBtn').addEventListener('click', () => { setFullCourt(!settings.fullCourt); titleScreen(); });
     $('smTitle').addEventListener('click', () => smoothnessCard(titleScreen));
-    $('musBtn').addEventListener('click', () => { PP.Sound.toggleMusic(); titleScreen(); });
+    $('musBtn').addEventListener('click', () => soundCard(titleScreen));
   }
 
   function seasonEntry() {
@@ -455,7 +479,7 @@
   }
 
   function halftime() {
-    screen = 'halftime'; I.unlock(); PP.Sound.crowdPause(true);
+    screen = 'halftime'; I.unlock(); PP.Sound.crowdPause(true); PP.Touch.reset(I);
     show(`<h2>Half time</h2><p class="big">${match.home.short} ${match.score[0]} - ${match.score[1]} ${match.away.short}</p>
       ${statsTable(match)}<button class="btn">Second half (Enter)</button>`, secondHalf);
   }
@@ -510,15 +534,40 @@
     enterAction = back;
   }
 
+  // Sound: one slider per bus (master, music, crowd, effects) plus the music on/off toggle.
+  const VOL_ROWS = [['master', 'Master'], ['music', 'Music'], ['crowd', 'Crowd'], ['sfx', 'Effects']];
+  function soundCard(back) {
+    const S = PP.Sound;
+    const rows = VOL_ROWS.map(([k, label]) => `<tr><td>${label}</td><td><input type="range" class="vol" data-k="${k}" min="0" max="100" step="5" value="${Math.round(S.vol[k] * 100)}"></td><td class="volv" id="vv-${k}">${Math.round(S.vol[k] * 100)}%</td></tr>`).join('');
+    show(`<h2>Sound</h2><table class="stats smooth">${rows}
+      <tr><td>Menu music</td><td><button class="btn toggle" id="musTog">${S.wantMusic ? 'ON' : 'OFF'}</button></td><td></td></tr></table>
+      <p class="hint">M mutes everything. The crowd is heard during play (it goes quiet while paused).</p>
+      <button class="btn" id="sndBack">Back</button>`);
+    overlay.querySelectorAll('input.vol').forEach((el) => {
+      el.addEventListener('input', () => { S.setVol(el.dataset.k, el.value / 100); $('vv-' + el.dataset.k).textContent = el.value + '%'; });
+      el.addEventListener('change', () => { if (el.dataset.k === 'sfx' || el.dataset.k === 'master') S.play('click'); });
+    });
+    $('musTog').addEventListener('click', () => { S.toggleMusic(); soundCard(back); });
+    $('sndBack').addEventListener('click', back);
+    enterAction = back;
+  }
+
   function pause() {
-    screen = 'paused'; I.unlock(); PP.Sound.crowdPause(true);
-    show(`<h2>Paused</h2>${squadTable(match.home)}${CONTROLS}<button class="btn" id="resBtn">Resume (Enter / P)</button> <button class="btn toggle" id="smBtn">Smoothness</button>`);
+    screen = 'paused'; I.unlock(); PP.Sound.crowdPause(true); PP.Touch.reset(I);
+    const arenaBtns = mode === 'arena' ? ' <button class="btn toggle" id="arenaSet">Change opponent</button> <button class="btn toggle" id="restartBtn">Restart (R)</button>' : '';
+    show(`<h2>Paused</h2>${squadTable(match.home)}${controlsHelp()}<button class="btn" id="resBtn">Resume (Enter / P)</button> <button class="btn toggle" id="smBtn">Smoothness</button> <button class="btn toggle" id="sndBtn">Sound</button>${arenaBtns}`);
+    $('sndBtn').addEventListener('click', () => soundCard(pause));
     $('resBtn').addEventListener('click', resume);
     $('smBtn').addEventListener('click', () => smoothnessCard(pause));
+    if (mode === 'arena') {
+      $('arenaSet').addEventListener('click', arenaScreen);   // back to the arena set-up (this match is dropped)
+      $('restartBtn').addEventListener('click', () => startMatch());
+    }
   }
-  function resume() { hide(); screen = 'match'; if (!match.noCrowd) PP.Sound.crowdPause(false); grab(); }
+  function resume() { PP.Touch.reset(I); hide(); screen = 'match'; if (!match.noCrowd) PP.Sound.crowdPause(false); grab(); }
 
   function updateHud() {
+    $('pauseBtn').hidden = !(screen === 'match' && touchDevice());
     if (!match) return;
     const min = Math.min(90, Math.floor(match.clock / 60));
     const c = match.controlled;
@@ -570,6 +619,7 @@
       else {
         acc += dt;
         match.mouseWorld = I.mouse ? R.screenToWorld(I.mouse.x, I.mouse.y) : null;
+        PP.Touch.update(match, R, I);
         const md = I.takeMouseDelta();
         if (lockMode() && I.locked() && (md.x || md.y)) match.nudgeMouse(md.x, md.y);
         while (acc >= C.DT) {
@@ -599,5 +649,5 @@
 
   titleScreen();
   requestAnimationFrame(frame);
-  PP.ui = { hub, resultsScreen, europeScreen, seasonEndScreen, squadScreen }; // console / testing
+  PP.ui = { hub, resultsScreen, europeScreen, seasonEndScreen, squadScreen, pause, arenaScreen }; // console / testing
 })();

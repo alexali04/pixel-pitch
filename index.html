@@ -2,8 +2,14 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
 <title>Pixel Pitch</title>
+<!-- iPhone: Safari can't hide its bars for a web page; "Add to Home Screen" opens it fullscreen -->
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Pixel Pitch">
+<link rel="manifest" href="manifest.json">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="style.css">
@@ -20,7 +26,9 @@
     </div>
     <div id="banner"></div>
     <div id="playerTag"></div>
+    <button id="pauseBtn" class="btn" hidden aria-label="Pause">II</button>
   </div>
+  <div id="rotate">Turn your phone sideways</div>
   <div id="overlay"></div>
 </div>
 
@@ -28,6 +36,7 @@
 <script src="js/util.js"></script>
 <script src="js/settings.js"></script>
 <script src="js/input.js"></script>
+<script src="js/touch.js"></script>
 <script src="js/audio.js"></script>
 <script src="js/ball.js"></script>
 <script src="js/player.js"></script>

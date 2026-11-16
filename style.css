@@ -224,3 +224,35 @@ kbd {
 .league tr.z3 td { color: #7d8b89; }
 .z1k { color: #7fb8ff; } .z2k { color: #9fd3c7; }
 .groups .league td { padding: calc(var(--s) * 0.35px) calc(var(--s) * 2px); font-size: calc(var(--s) * 3.8px); }
+
+/* Sound card volume sliders */
+input.vol { width: calc(var(--s) * 60px); accent-color: var(--accent); cursor: pointer; vertical-align: middle; }
+td.volv { color: var(--accent); min-width: calc(var(--s) * 16px); text-align: right; }
+
+/* Touch screens */
+html, body { touch-action: none; -webkit-touch-callout: none; -webkit-user-select: none; overscroll-behavior: none; }
+#overlay .card { touch-action: pan-y; }
+#game { touch-action: none; }
+/* keep the HUD clear of the notch / rounded corners when the pitch fills the screen */
+#hud { left: env(safe-area-inset-left); right: env(safe-area-inset-right); }
+#pauseBtn {
+  position: absolute;
+  top: calc(var(--s) * 4px);
+  left: calc(var(--s) * 4px);
+  margin: 0;
+  pointer-events: auto;
+  font-size: calc(var(--s) * 7px);
+  padding: calc(var(--s) * 3px) calc(var(--s) * 5px);
+}
+#pauseBtn[hidden] { display: none; }
+#rotate { display: none; }
+@media (orientation: portrait) and (pointer: coarse) {
+  #rotate {
+    display: flex; position: fixed; inset: 0; z-index: 10;
+    align-items: center; justify-content: center; text-align: center; padding: 24px;
+    background: var(--bg); color: var(--accent); font-size: 14px; line-height: 1.8;
+  }
+}
+@media (pointer: coarse) {
+  .btn { min-height: 36px; }
+}

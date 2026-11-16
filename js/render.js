@@ -1,6 +1,7 @@
 (function () {
   const C = PP.C, U = PP.U;
-  const PX = C.PX, PY = C.PY, PZ = C.PZ, VW = C.VIEW_W, VH = C.VIEW_H, M = C.MARGIN;
+  const PX = C.PX, PY = C.PY, PZ = C.PZ, VH = C.VIEW_H, M = C.MARGIN;
+  let VW = C.VIEW_W; // phones widen the view to fill the screen (setWidth)
   // Perspective: the camera sits in the stands on the near touchline, so the far side of the
   // pitch is smaller than the near side. Lines running up the pitch (goal lines, box edges)
   // lean towards a vanishing point, which shows the goal mouths at an angle.
@@ -59,6 +60,14 @@
       this.cam = { x: C.W / 2, y: C.H / 2 };
       this.pitch = this.buildPitch();
       this.t = 0;
+    }
+
+    // Change the canvas width (same height), e.g. to match a phone's wide screen.
+    setWidth(w) {
+      if (w === VW) return;
+      VW = C.VIEW_W = w;
+      this.cv.width = w;
+      this.ctx.imageSmoothingEnabled = false;
     }
 
     k(y) { return 1 + PERSP * (y - this.cam.y); }                 // scale at depth y
@@ -256,6 +265,7 @@
           cross(this.sx(wx, wy), this.sy(wy), m.charging ? '#ffd23f' : 'rgba(255,255,255,0.85)');
         }
       }
+      this.drawTouch(m);
       this.drawPopups(m);
       this.drawRadar(m);
       if (m.state === 'replay') this.drawReplayTag();
@@ -273,6 +283,41 @@
     }
 
     // Dashed line from the passer to where the pass will go while a pass button is held.
+    // Touch feedback: the slingshot (the band from where your finger landed, and the ball's line
+    // the other way, coloured by what it'll be) and the dribble joystick.
+    drawTouch(m) {
+      const I = PP.Input, T = PP.Touch, g = this.ctx, p = m.controlled, b = m.ball;
+      if (!I.usedTouch || !p || m.state === 'replay') return;
+      const ring = (x, y, r, col) => { g.strokeStyle = col; g.lineWidth = 1; g.beginPath(); g.arc(Math.round(x) + 0.5, Math.round(y) + 0.5, r, 0, Math.PI * 2); g.stroke(); };
+      const ta = m.touchAim;
+      if (m.charging && ta && T.aimId != null) {
+        // the band
+        ring(ta.ox, ta.oy, 5, 'rgba(255,255,255,0.5)');
+        g.strokeStyle = 'rgba(255,255,255,0.35)'; g.beginPath(); g.moveTo(ta.ox + 0.5, ta.oy + 0.5); g.lineTo(ta.fx + 0.5, ta.fy + 0.5); g.stroke();
+        // the ball's line
+        const bx = this.sx(b.rx, b.ry), by = this.sy(b.ry);
+        let vx = ta.kx, vy = ta.ky;
+        const L = Math.hypot(vx, vy), k = L > T.LMAX ? T.LMAX / L : 1;
+        vx *= k * 0.7; vy *= k * 0.7;
+        const col = m.preview && m.preview.shot ? '#ff6b4a' : m.touchLob ? '#ffd23f' : '#ffffff';
+        const n = Math.max(2, Math.floor(Math.hypot(vx, vy) / 4));
+        for (let i = 1; i <= n; i++) {
+          const x = Math.round(bx + (vx * i) / n), y = Math.round(by + (vy * i) / n), big = i === n ? 1 : 0;
+          g.fillStyle = '#000'; g.fillRect(x - 1, y - 1, 3 + big, 3 + big);
+          g.fillStyle = col; g.fillRect(x, y, 1 + big, 1 + big);
+        }
+        if (ta.ground) {
+          g.font = '7px monospace'; g.textAlign = 'center'; g.fillStyle = '#000';
+          g.fillText('GROUND', bx + vx + 1, by + vy - 5); g.fillStyle = '#fff'; g.fillText('GROUND', bx + vx, by + vy - 6);
+        }
+      }
+      const st = T.stickId != null && I.touches.get(T.stickId);
+      if (st) {
+        ring(st.x0, st.y0, 9, 'rgba(159,211,199,0.45)');
+        ring(st.x, st.y, 3, 'rgba(159,211,199,0.9)');
+      }
+    }
+
     drawPreview(m) {
       const pv = m.preview, p = m.controlled;
       if (!pv || !p || !m.charging) return;

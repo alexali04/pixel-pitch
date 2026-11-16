@@ -1,5 +1,6 @@
 // Global namespace and constants. Units are metres and seconds.
 window.PP = window.PP || {};
+PP.VERSION = 'alpha v0.1';
 
 PP.C = {
   W: 105, H: 50,                 // pitch length (x) and width (y); narrower than real for more direct play

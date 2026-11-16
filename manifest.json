@@ -1,0 +1,9 @@
+{
+  "name": "Pixel Pitch",
+  "short_name": "Pixel Pitch",
+  "start_url": "./",
+  "display": "fullscreen",
+  "orientation": "landscape",
+  "background_color": "#0d1b1e",
+  "theme_color": "#0d1b1e"
+}

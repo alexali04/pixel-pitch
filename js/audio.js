@@ -3,6 +3,11 @@
 (function () {
   const S = (PP.Sound = { ctx: null, master: null, noise: null, crowd: null, muted: false });
   try { S.muted = localStorage.getItem('pp.muted') === '1'; } catch (e) { /* no storage */ }
+  // Volume sliders (0..1 each, 1 = the default mix): master, music, crowd, effects.
+  S.vol = { master: 1, music: 1, crowd: 1, sfx: 1 };
+  try { Object.assign(S.vol, JSON.parse(localStorage.getItem('pp.vol') || '{}')); } catch (e) { /* no storage */ }
+  const MASTER = 0.6;
+  const masterLevel = () => (S.muted ? 0 : MASTER * S.vol.master);
 
   function init() {
     if (S.ctx) { if (S.ctx.state === 'suspended') S.ctx.resume(); return; }
@@ -10,8 +15,10 @@
     if (!AC) return;
     const ctx = (S.ctx = new AC());
     S.master = ctx.createGain();
-    S.master.gain.value = S.muted ? 0 : 0.6;
+    S.master.gain.value = masterLevel();
     S.master.connect(ctx.destination);
+    S.sfx = ctx.createGain(); S.sfx.gain.value = S.vol.sfx; S.sfx.connect(S.master);
+    S.musicOut = ctx.createGain(); S.musicOut.gain.value = S.vol.music; S.musicOut.connect(S.master);
     const len = ctx.sampleRate * 2;
     S.noise = ctx.createBuffer(1, len, ctx.sampleRate);
     const d = S.noise.getChannelData(0);
@@ -21,6 +28,7 @@
   }
   addEventListener('keydown', init);
   addEventListener('pointerdown', init);
+  addEventListener('touchend', init); // iOS unlocks audio on touchend
 
   const now = () => S.ctx.currentTime;
 
@@ -36,7 +44,7 @@
     o.frequency.setValueAtTime(f0, t0);
     if (f1 !== f0) o.frequency.exponentialRampToValueAtTime(Math.max(1, f1), t0 + dur);
     env(g, t0, vol, 0.004, dur);
-    o.connect(g).connect(S.master);
+    o.connect(g).connect(S.sfx);
     o.start(t0); o.stop(t0 + dur + 0.05);
   }
 
@@ -45,7 +53,7 @@
     src.buffer = S.noise;
     f.type = filter; f.frequency.value = freq; f.Q.value = q;
     env(g, t0, vol, attack, dur);
-    src.connect(f).connect(g).connect(S.master);
+    src.connect(f).connect(g).connect(S.sfx);
     src.start(t0, Math.random()); src.stop(t0 + attack + dur + 0.05);
     return f;
   }
@@ -97,7 +105,7 @@
           g.gain.exponentialRampToValueAtTime(0.09, t + 0.02);
           g.gain.setValueAtTime(0.09, t + len);
           g.gain.exponentialRampToValueAtTime(0.0001, t + len + 0.06);
-          o.connect(g).connect(S.master);
+          o.connect(g).connect(S.sfx);
           o.start(t); lfo.start(t); o.stop(t + len + 0.1); lfo.stop(t + len + 0.1);
         }
       }
@@ -224,12 +232,13 @@
   // Everything the crowd does goes through one bus: its overall level, and silence on pause.
   const CROWD_VOL = 0.5;
   function bus() {
-    if (!S.crowdBus) { S.crowdBus = S.ctx.createGain(); S.crowdBus.gain.value = CROWD_VOL; S.crowdBus.connect(S.master); }
+    if (!S.crowdBus) { S.crowdBus = S.ctx.createGain(); S.crowdBus.gain.value = CROWD_VOL * S.vol.crowd; S.crowdBus.connect(S.master); }
     return S.crowdBus;
   }
   S.crowdPause = function (paused) {
     if (!S.ctx) return;
-    bus().gain.setTargetAtTime(paused ? 0.0001 : CROWD_VOL, S.ctx.currentTime, 0.12);
+    S.crowdPaused = paused;
+    bus().gain.setTargetAtTime(paused ? 0.0001 : Math.max(0.0001, CROWD_VOL * S.vol.crowd), S.ctx.currentTime, 0.12);
   };
 
   // The bed: the ambience recording's takes chained end to end with 2.5 s crossfades (the file
@@ -326,7 +335,7 @@
     const bus = S.ctx.createGain();
     bus.gain.setValueAtTime(0.0001, S.ctx.currentTime);
     bus.gain.exponentialRampToValueAtTime(0.22, S.ctx.currentTime + 1.2);
-    bus.connect(S.master);
+    bus.connect(S.musicOut);
     S.music = { bus, step: 0, next: S.ctx.currentTime + 0.1, timer: setInterval(musicTick, 90) };
   };
   S.musicOff = function () {
@@ -350,7 +359,17 @@
   S.toggleMute = function () {
     S.muted = !S.muted;
     try { localStorage.setItem('pp.muted', S.muted ? '1' : '0'); } catch (e) { /* no storage */ }
-    if (S.master) S.master.gain.value = S.muted ? 0 : 0.6;
+    if (S.master) S.master.gain.value = masterLevel();
     return S.muted;
+  };
+  S.setVol = function (k, v) {
+    S.vol[k] = Math.max(0, Math.min(1, v));
+    try { localStorage.setItem('pp.vol', JSON.stringify(S.vol)); } catch (e) { /* no storage */ }
+    if (!S.ctx) return;
+    const t = S.ctx.currentTime;
+    if (k === 'master') S.master.gain.setTargetAtTime(masterLevel(), t, 0.03);
+    if (k === 'music') S.musicOut.gain.setTargetAtTime(S.vol.music, t, 0.03);
+    if (k === 'sfx') S.sfx.gain.setTargetAtTime(S.vol.sfx, t, 0.03);
+    if (k === 'crowd' && S.crowdBus && !S.crowdPaused) S.crowdBus.gain.setTargetAtTime(Math.max(0.0001, CROWD_VOL * S.vol.crowd), t, 0.03);
   };
 })();

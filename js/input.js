@@ -4,7 +4,7 @@
     down: ['ArrowDown', 'KeyS'],
     left: ['ArrowLeft', 'KeyA'],
     right: ['ArrowRight', 'KeyD'],
-    sprint: ['ShiftLeft', 'ShiftRight'],
+    sprint: ['ShiftLeft', 'ShiftRight', 'TouchSprint'],
     pass: ['KeyJ', 'KeyZ'],
     lob: ['KeyK', 'KeyX'],
     shoot: ['Space', 'KeyC'],
@@ -16,7 +16,7 @@
     mute: ['KeyM'],
   };
   const GAME_KEYS = new Set(Object.values(BIND).flat());
-  const BIND_LOB = [...BIND.lob, 'Mouse2'], BIND_CLICK = ['Mouse0'];
+  const BIND_LOB = [...BIND.lob, 'Mouse2', 'TouchSlide'], BIND_CLICK = ['Mouse0', 'TouchKick', 'TouchTap'];
 
   const I = (PP.Input = {
     keys: {}, pr: {}, rel: {},
@@ -50,6 +50,31 @@
       });
       addEventListener('mouseup', (e) => { const k = 'Mouse' + e.button; if (this.keys[k]) this.rel[k] = true; this.keys[k] = false; });
       cv.addEventListener('contextmenu', (e) => e.preventDefault());
+      // Touch: raw fingers in canvas pixels; PP.Touch turns them into gestures each frame.
+      this.touches = new Map(); this.touchAx = null; this.tapped = false;
+      const pos = (t) => {
+        const r = cv.getBoundingClientRect();
+        return { x: ((t.clientX - r.left) / r.width) * cv.width, y: ((t.clientY - r.top) / r.height) * cv.height };
+      };
+      cv.addEventListener('touchstart', (e) => {
+        e.preventDefault();
+        this.usedTouch = true; this.tapped = true;
+        for (const t of e.changedTouches) {
+          const q = pos(t);
+          this.touches.set(t.identifier, { id: t.identifier, x: q.x, y: q.y, x0: q.x, y0: q.y, t0: performance.now() / 1000, role: null, up: false });
+        }
+        if (this.onTouch) this.onTouch();
+      }, { passive: false });
+      cv.addEventListener('touchmove', (e) => {
+        e.preventDefault();
+        for (const t of e.changedTouches) { const o = this.touches.get(t.identifier); if (o) Object.assign(o, pos(t)); }
+      }, { passive: false });
+      const end = (e) => {
+        e.preventDefault();
+        for (const t of e.changedTouches) { const o = this.touches.get(t.identifier); if (o) { Object.assign(o, pos(t)); o.up = true; } }
+      };
+      cv.addEventListener('touchend', end, { passive: false });
+      cv.addEventListener('touchcancel', end, { passive: false });
     },
     locked() { return document.pointerLockElement === this.canvas; },
     lock() {
@@ -68,12 +93,14 @@
     hit(a) { return this.bind(a).some((k) => this.pr[k]); },
     released(a) { return this.bind(a).some((k) => this.rel[k]); },
     axis() {
+      const ta = this.touchAx;
+      if (ta && !['up', 'down', 'left', 'right'].some((a) => this.down(a))) return ta;
       let x = (this.down('right') ? 1 : 0) - (this.down('left') ? 1 : 0);
       let y = (this.down('down') ? 1 : 0) - (this.down('up') ? 1 : 0);
       if (x && y) { x *= Math.SQRT1_2; y *= Math.SQRT1_2; }
       return { x, y };
     },
     // Edge-triggered flags are consumed once per simulation step.
-    endStep() { this.pr = {}; this.rel = {}; },
+    endStep() { this.pr = {}; this.rel = {}; this.tapped = false; },
   });
 })();
