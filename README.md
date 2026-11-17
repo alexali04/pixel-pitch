@@ -18,35 +18,39 @@ anyone on that network can open the game.
 
 ## Controls
 
+Desktop: move with the keys, aim with the mouse or trackpad (no right click needed).
+
 | | Attacking | Defending |
 |---|---|---|
-| WASD / Arrows | move (aims passes and shots) | move |
+| WASD | move | move |
 | Shift | sprint | sprint |
-| J | ground pass (to the team-mate you're pointing at) | switch player |
-| K | lofted pass; aimed at goal from within ~26m (not from wide) it's a chip shot | slide tackle |
-| L / Space | shoot | tackle (or go for a loose ball) |
-| J / Space with the ball in the air near you | header pass / header at goal | header clearance (Space) |
-| Space with the ball loose on the floor | sprint to collect it | sprint to intercept it |
-| P / Esc | pause | pause |
+| Click (hold = harder) | pass to the pointer; on the goal mouth = shot | tackle (or go for a loose ball / header) |
+| Space (hold = further) | chip / lofted pass towards the pointer; at goal from within ~26m = chip shot | slide tackle |
+| J | ground pass towards the pointer (never lifted, never a shot) | switch player |
+| Esc | cancel the pass you're holding | pause |
+| P | pause | pause |
 | R | restart the match | restart the match |
 | M | mute / unmute sound | mute / unmute sound |
+
+Also still there: arrow keys move; C / L shoot; K = Space. The Smoothness menu can switch aiming
+to the keys (or team-mate targeting) if you'd rather not use the pointer.
 
 Receiving takes a moment: a hard or dropping ball must be brought under control before you can
 play it (better first touch = quicker); a pass released early goes as soon as it's controlled.
 
-Hold J / K / Space to set strength, like how far you swing your leg: a tap on J is a firm
+Hold the click / Space / J to set strength, like how far you swing your leg: a tap on J is a firm
 ~15m pass and a full hold is a ~40m ball (capped, so it won't fly out of play); keepers
-play it firmer, and back-passes to the keeper always reach him; a tap on K is a short
+play it firmer, and back-passes to the keeper always reach him; a tap on Space is a short
 chip that still arcs over a defender and a full hold is a ~45m ball; a full wind-up on a shot is hard but can fly wide or over. L and C also shoot. From point-blank range (about 13m out, central) a shot you aren't aiming at the goal mouth goes towards goal anyway, away from the keeper.
 
 **Aiming passes:** the pass goes where the aim points, with a light assist: it leans onto a
 team-mate's run when one is within ~14° of the line, leans a touch towards goal in the final
 third, and turns back into play (or towards the box) rather than going straight out. The aim starts at your direction
-when you press J/K and then turns smoothly (~150°/s) towards whatever direction you hold, so
+when you press J / Space and then turns smoothly (~150°/s) towards whatever direction you hold, so
 you can stop it at any angle. A dashed line shows where the ball will go, and a ring marks the
 teammate who will get there first; they run onto it. Keepers can't handle back-passes.
 
-Keepers holding the ball: **J** rolls it out, **K** / **Space** kicks it.
+Keepers holding the ball: **J** rolls it out, **Space** kicks it.
 
 ### Touch (phones and tablets)
 
@@ -79,7 +83,8 @@ On the title screen or pause menu: **Pass assist** (off / light / strong), **Aim
 speed**, **Mouse sensitivity** (locked mouse), **Auto-tackle**, **Auto-sprint on defence**. With
 mouse aim the keys only move your player. **Left click** is one action: click on the goal mouth to
 shoot there, anywhere else to pass there (hold to strike harder); on defence it tackles. **Right
-click** is lofted: a chip if you click the goal from close in, otherwise a floated pass.
+click** is lofted: a chip if you click the goal from close in, otherwise a floated pass. Holding
+a pass and changed your mind? Esc cancels it (a right click, if you have one, restarts the strength from 0).
 
 The ball goes where your body allows: while you wind up, your player turns towards the aim (quick
 standing, slow at a sprint) and can only strike ~77° across his body at full speed (~109° standing),
@@ -92,6 +97,8 @@ deeper the nearer the ball is to your goal) or *stay high for the counter*. CPU 
 **Defending assist** (when idle / always / off): your controlled defender takes up his AI role —
 press, cover, mark, or go to where a lofted ball will land — whenever you're not steering (or
 always, with your keys nudging him).
+**Camera** (close / wide): close is zoomed in, so the box is big next to the players and the
+view follows the ball across the width; wide is the old view with the whole width on screen.
 
 When you press a pass button the aim is exactly the direction you're holding — except when you're
 right by a touchline holding straight at it, where it starts on a team-mate along the line instead. With the keys,
@@ -117,9 +124,22 @@ Toggle on the title screen (button or **F**):
 
 **Test arena** on the title screen: practise against exactly the opponent you want. Pick your
 club, how they defend (low block / mid block / high press), their shape (narrow / balanced /
-wide), their strength (very weak to very strong, or even with you), their formation, full game or
-attacking phases, and half length. No crowd, no season; R restarts the same match. Click a row to
+wide), their strength (very weak to very strong, or even with you), their formation, how hard they
+press (passive to relentless, or the usual for their block), full game or attacking phases, and
+half length. They keep the block you picked all game. No crowd, no season; R restarts the same match. Click a row to
 change it (shift-click goes back).
+
+## Practice
+
+**Practice** on the title screen: drills on the real match engine, with your arena club. Reps
+reset themselves and the scoreboard keeps count; R starts the drill again.
+
+- **Shooting**: you, a team-mate and their keeper. A mix of shots from the edge of the box, lay-offs
+  played into your path and crosses from the byline. Scoreboard: goals / attempts.
+- **Passing**: a rondo, five of you round a 20m circle and two of them in the middle pressing and
+  cutting the lanes. Scoreboard: passes in a row (and your best).
+- **Dribbling**: from halfway, beat the defenders and get into the box with the ball. Every three
+  successes adds a defender (up to three). Scoreboard: successes / attempts and the level.
 
 ## Season
 
@@ -127,10 +147,19 @@ change it (shift-click goes back).
 League (player names are made up). Each club has a rating, a formation and a play style that
 drives its AI (low / mid / high block, width, forwards up or back), and a rival: rivalry games
 are flagged as derbies. 38 rounds, home and away. The season saves automatically in the browser;
-**Start over** deletes it. **Friendly** lets you pick any two clubs.
+**Start over** deletes it. **Friendly** lets you pick any two clubs, Premier League or European (your season's squads where you have one), listed strongest first; **Strongest opponent** picks the best side in the game.
+
+**Export for feedback** (pause menu): saves a screenshot of the paused moment and the full match state (every player's position, speed, stats and what the AI has him doing, plus the ball) with an optional note, as `feedback/<time>.png` and `.json` via `serve.py` (it downloads them instead if the game isn't served by `serve.py`). `feedback/` is git-ignored. How the CPU players work: [docs/AI.md](docs/AI.md).
 
 - **Hub**: next fixture with both teams' star ratings and the opponent's style, the table around
-  you, coins, fan and board meters. Table / Fixtures / Squad screens.
+  you, coins, fan and board meters. Table / Fixtures / Squad / Stats screens.
+- **Stats**: player stats for the season. *Your squad*: appearances, goals, assists, shots, tackles
+  won and clean sheets (keepers), all competitions. *Top scorers* / *Top assists*: the Premier
+  League charts across every club. Your matches count exactly as they happened; the other games
+  are simulated, so their goals (and, three times in four, an assist) are handed out to the XI by
+  position and finishing / creativity. An assist is the last pass of the move before the scorer's
+  shot, with no opponent touching it in between. Full time lists scorers with their assists and
+  your players' lines for the match.
 - **Squad**: your XI on a pitch map plus a 7-man bench. Click one player and then another to swap
   them. Pick a formation (4-3-3, 4-4-2, 4-1-4-1, 4-3-1-2, 3-4-3, 4-2-3-1); players are re-arranged
   to suit it. Players out of their natural position (shown in brackets, amber / red) lose some
@@ -154,7 +183,7 @@ opponents, two from each pot, never one from its own country, over eight matchda
 league rounds. **1st-8th** go straight to the Round of 16; **9th-24th** play two-legged knockout
 play-offs for the other eight places; 25th-36th are out. Round of 16, quarter-finals and
 semi-finals are two-legged (the better league-phase finisher hosts the second leg; level on
-aggregate means penalties), then a one-off final at a neutral ground. You play your own games;
+aggregate after 90 minutes means **extra time**, 2x15 minutes, then penalties), then a one-off final at a neutral ground (a draw: extra time, then penalties). Shootouts are simulated for now. You play your own games;
 the rest are simulated. The **Europe** screen shows the 36-club table and every tie. European
 nights pay more (bigger gates, prize money per round) and lift fans and board.
 
@@ -165,9 +194,14 @@ slide, and less likely from good tacklers (and much less likely in a defender's 
 gives a free kick where it happened, or a **penalty** in the box: everyone else waits outside the
 box, the keeper stays on his line and has to guess a side. Reckless challenges (sliding in from
 behind above all) get a yellow card; a second yellow is a red and the player is sent off, leaving
-his side a man short. Cards are listed at half-time and full time. Free kicks within ~30 m of goal are **direct**: the defenders form
+his side a man short. The referee holds the card up over the player and the banner names him;
+a booked player tackles more carefully. Cards are listed at half-time and full time.
+
+**Stoppage time:** as each half reaches 45 (or 90) the board goes up: a minute or two, more after
+goals, cards and penalties. The clock reads 45+1, 45+2... and the referee won't blow with a shot
+on its way or the ball in a box (for up to 20 more seconds). Free kicks within ~30 m of goal are **direct**: the defenders form
 a 3-4 man wall 9.15 m away (shading the near post) and you can't take it until it's set (about
-2 s); Space shoots it with dip to get up and over, and the wall can block it. CPU sides have a
+2 s); clicking on the goal shoots it with dip to get up and over, and the wall can block it. CPU sides have a
 go about two times in three.
 
 ## Presentation

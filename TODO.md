@@ -2,6 +2,36 @@
 
 Things that need design work before they can be built well.
 
+## Versions
+- **alpha v0.1** (tag `v0.1`): 11v11 full court, season mode with EPL clubs and the Champions
+  League, mouse/keyboard and touch controls.
+- **alpha v0.2** (in progress), goal: much smoother, more interesting gameplay. Started with play
+  through the middle: a link midfielder shows in the pocket between their lines, the striker
+  sometimes comes short, and midfield pressers jockey instead of diving in (`PP.debug.hold()`
+  measures it).
+- Player stats: done (Stats screen in the season hub). Later: a transfer market (below).
+- v0.2 candidates: far too many fouls (~11 free kicks per 3-minute half in AI-vs-AI sims, same in
+  v0.1).
+
+## Hard (big, worth doing properly)
+
+- **Dribbling.** Cuts with defender momentum (a sharp change of direction leaves a committed
+  defender going the wrong way), push past / knock-on (kick it beyond the man and race him),
+  shielding with your back to him, close control at walking pace.
+- **Target man against a low block.** Low-block sides often leave one striker high on the last
+  line: he holds the ball up (back to goal, wins it from the clearance, lays off to the runners
+  arriving) or spins the centre-back for a ball in behind. Needs: who stays up (the low block's
+  ST), hold-up with the back to goal, the lay-off, and the CBs having to decide whether to follow.
+- **Playable penalty shootouts** (knockout ties level after extra time are simulated today).
+
+## Player stats (done: season totals, top scorers / assists, the Stats screen)
+Next: keepers' saves, match ratings / player of the match, past seasons' records, and form
+feeding the transfer market's values.
+
+## Transfer market
+Buy and sell players with coins: valuations from rating, age and season stats; AI clubs
+buying and selling; squad size limits.
+
 ## Pinned low block / "break them down" phases
 A phase of play to aim for: the opponent is pinned deep in a very low, compact block and the
 challenge becomes breaking them down (patient circulation, switching play, third-man runs,

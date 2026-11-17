@@ -14,6 +14,12 @@
       this.half = 1;
       this.time = 0;                   // real sim seconds
       this.halfLen = opts.halfSeconds || C.HALF_SECONDS;
+      this.fixedBlock = !!opts.fixedBlock; // test arena: the opponent always defends with the block you picked
+      // A knockout decider: { agg: [yours, theirs] } going into it ([0, 0] for a one-off). Level
+      // after 90 (on aggregate) means 2x15 minutes of extra time, then penalties.
+      this.ko = opts.ko || null;
+      this.added = null;               // stoppage time (minutes) for this period, once it's shown
+      this.stoppage = 0;               // minutes of stoppages building up this period
       this.state = 'restart';
       this.restart = null;
       this.stateT = 0;
@@ -27,6 +33,9 @@
       this.banner = null;
       this.events = [];
       this.stats = { shots: [0, 0], onTarget: [0, 0], poss: [0, 0] };
+      this.pstats = new Map();  // per player this match: goals, assists, shots, tackles won
+      this.chain = null;        // the last pass in this move: { by, team } (for assists)
+      this.shotAssist = null;   // who set up the shot in flight
       this.firstKickoff = Math.random() < 0.5 ? 0 : 1;
       this.ballPath = null;
       // Full court = continuous 11v11 with defending. Off = you only play your attacking
@@ -38,14 +47,42 @@
       this.phaseInHalf = 0;
       if (this.fullCourt) this.kickoff(this.teams[this.firstKickoff]);
       else this.startPhase();
+      this.drill = opts.drill ? new PP.Drill(this, opts.drill) : null; // practice: shooting / passing / dribbling
     }
 
     other(t) { return t === this.home ? this.away : this.home; }
     idx(t) { return t === this.home ? 0 : 1; }
-    say(text, t = 1.4) { this.banner = { text, t }; }
+    // The banner. A booking's stays up a moment over the routine "Free kick" that follows it.
+    say(text, t = 1.4) {
+      if (this.time < (this.bannerLock || 0) && !/PENALTY|GOAL|goal|score/.test(text)) return;
+      this.banner = { text, t };
+    }
+    ps(p) { let r = this.pstats.get(p); if (!r) this.pstats.set(p, (r = { goals: 0, assists: 0, shots: 0, tackles: 0 })); return r; }
+    // Every player's line for this match (both XIs), for the season stats.
+    playerLines() {
+      const line = (t) => t.players.map((p) => ({ name: p.name, role: p.role, ...this.ps(p) }));
+      return { home: line(this.home), away: line(this.away) };
+    }
     sfx(name, arg) { if (this.sound && !this.autoplay && PP.Sound) PP.Sound.play(name, arg); }
     pop(p, text, color = '#ffffff') { this.popups.push({ x: p.x, y: p.y, text, color, t: 0.9 }); }
     get minute() { return Math.floor(this.clock / 60); }
+    // Periods: 1-2 the halves, 3-4 extra time. Their nominal end, in game seconds.
+    nominalEnd(h = this.half) { return Match.PERIOD_END[h - 1] * 60; }
+    endOf() { return this.nominalEnd() + (this.added ?? 0) * 60; }
+    // "67", or "45+2" in stoppage time (for the clock and the match events).
+    minuteLabel() {
+      const n = this.nominalEnd();
+      return this.clock >= n ? `${n / 60}+${Math.floor((this.clock - n) / 60) + 1}` : `${Math.floor(this.clock / 60) + 1}`;
+    }
+    // Level once their goals from the first leg count (one-off ties start [0, 0]).
+    koLevel() { const a = this.ko.agg || [0, 0]; return this.score[0] + a[0] === this.score[1] + a[1]; }
+    // The fourth official's board goes up as the period reaches its nominal end.
+    checkAdded() {
+      if (this.added != null || this.clock < this.nominalEnd() || this.drill) return;
+      const base = this.half === 1 ? U.rand(0.4, 1.6) : this.half === 2 ? U.rand(1.6, 3.2) : U.rand(0, 1.2);
+      this.added = Math.round(U.clamp(base + this.stoppage, this.half > 2 ? 0 : 1, this.half === 2 ? 8 : 4));
+      if (this.added) this.say(`+${this.added} minute${this.added > 1 ? 's' : ''} added`, 2.2);
+    }
 
     nearestUser(x, y, exclude = null) {
       let best = null, bd = 1e9;
@@ -218,6 +255,14 @@
       b.back = this.pendingBack || 0; this.pendingBack = 0;
       b.lastKick = { type, by: p, team: p.team, target, t: this.time,
         back: !!target && p.team.depth(target.x) < p.team.depth(p.x) - 0.03 };
+      // Assists: the last pass of the move sets up whoever shoots next (same side, no opponent
+      // touch in between; see sanity()).
+      if (type === 'pass') this.chain = { by: p, team: p.team };
+      else if (type === 'clear') this.chain = null;
+      else if (type === 'shot') {
+        if (!this.drill) this.ps(p).shots++;
+        this.shotAssist = this.chain && this.chain.team === p.team && this.chain.by !== p ? this.chain.by : null;
+      }
       if (type === 'pass' && this.state === 'play') {
         // Offside: in their half, ahead of the ball and of the second-last defender.
         const t = p.team, line = PP.AI.trueOffsideLine(this, t), bd = t.depth(b.x);
@@ -263,7 +308,7 @@
       const b = this.ball;
       const D0 = Math.max(1, U.dist(b.x, b.y, tx, ty));
       const skill = Match.passSkill(p, lofted) / 100;
-      const angErr = (0.015 + D0 * 0.0012) * (1.6 - skill) * (1 + this.pressureOn(p) * (1.2 - p.stats.composure / 100)) * (p.team.isUser ? 1 : Match.CPU_ERR);
+      const angErr = (0.015 + D0 * 0.0012) * (1.6 - skill) * (1 + this.pressureOn(p) * (1.2 - p.stats.composure / 100)) * (p.team.isUser ? 1 : PP.AI.TUNE.sharp ? Match.CPU_PASS_ERR : Match.CPU_ERR);
       const dir = U.rot((tx - b.x) / D0, (ty - b.y) / D0, U.gauss() * angErr);
       const D = D0 * (1 + U.gauss() * (p.team.isUser ? 0.05 : 0.12) * (1.6 - skill)); // CPU misjudges weight
       let T0;
@@ -338,7 +383,7 @@
       } else {
         // A chip always rises in a clear arc; holding longer sends it further and higher.
         // Floated with backspin: it climbs, hangs, and drops steeply (keepers drive theirs flatter).
-        const D = p.isGK ? 20 + power * 35 : 7 + power * 38, T = p.isGK ? 0.75 + D / 20 : 0.9 + D / 26; // a little more hang than a drive
+        const D = p.isGK ? 20 + power * 35 : 7 + power * 38, T = p.isGK ? 0.75 + D / 20 : 0.7 + D / 30; // quicker than it used to be: 36m in ~1.9s
         back = p.isGK ? 0.3 : Match.LOFT_BACK;
         const L = Ball.loftLaunch(D * 0.8, T, back);
         vx = nx * L.s; vy = ny * L.s; vz = L.vz;
@@ -403,7 +448,7 @@
       power = U.clamp(power, 0.15, 1);
       const speed = 21 + 10 * power + 6 * pow * power;  // tap ~21 m/s, full wind-up ~35 m/s
       const longShot = D > 20 ? 1 + (D - 20) * 0.02 * (1.3 - p.stats.longShots / 100) : 1;
-      const angErr = (0.035 + D * 0.002 + power * power * 0.06 + pressure * 0.09 * (1.3 - p.stats.composure / 100)) * (1.6 - fin) * longShot * (team.isUser ? 1 : Match.CPU_ERR);
+      const angErr = (0.035 + D * 0.002 + power * power * 0.06 + pressure * 0.09 * (1.3 - p.stats.composure / 100)) * (1.6 - fin) * longShot * (team.isUser ? 1 : PP.AI.TUNE.sharp ? Match.CPU_SHOT_ERR : Match.CPU_ERR);
       const dir = U.rot((gx - b.x) / D, (ty - b.y) / D, U.gauss() * angErr * (pen ? 0.5 : 1));
       const t = D / speed;
       const h = Math.max(0.1, 0.35 + power * 1.25 + U.gauss() * (0.35 + power * 0.8 + pressure * 0.5) * (1.5 - fin) * (pen ? 0.5 : 1));
@@ -454,7 +499,7 @@
         p.lunge = 0;
         const c = p.lungeTarget; p.lungeTarget = null;
         if (this.state !== 'play' || this.ball.owner !== c) continue;
-        if (U.dist(p.x, p.y, c.x, c.y) > (p.team.isUser ? 2.3 : 1.9)) { p.stun = 0.3; this.pop(p, 'MISS', '#cfd8d6'); continue; }
+        if (U.dist(p.x, p.y, c.x, c.y) > (p.team.isUser ? (PP.AI.TUNE.mates && (p !== this.controlled || this.autoplay) ? 2.1 : 2.3) : 1.9)) { p.stun = 0.3; this.pop(p, 'MISS', '#cfd8d6'); continue; }
         this.resolveTackle(p, c, false);
       }
     }
@@ -484,14 +529,20 @@
       if (b.owner !== c || this.state !== 'play') return;
       const toT = U.norm(t.x - c.x, t.y - c.y);
       const front = c.fx * toT.x + c.fy * toT.y; // 1 = tackler head-on, -1 = from behind
-      const hold = (c.stats.dribbling + c.stats.strength) / 2;
-      let ch = (slide ? 0.62 : t.team.isUser ? 0.78 : 0.42) + Math.max(0, front) * 0.12 + (t.stats.tackling - hold) * 0.007;
-      if (front < -0.3) ch *= t.team.isUser ? 0.85 : 0.5; // carrier is shielding it
+      // CPU forwards are built to hold it up: harder to knock off the ball.
+      const holdUp = !c.team.isUser && PP.AI.TUNE.sharp && ['ST', 'LW', 'RW', 'AM'].includes(c.role);
+      const hold = (c.stats.dribbling + c.stats.strength) / 2 + (holdUp ? 8 : 0);
+      // Your own tackles are generous; your AI team-mates' less so (or your press is unplayable).
+      const mate = t.team.isUser && (t !== this.controlled || this.autoplay) && PP.AI.TUNE.mates; // in sims nobody is you
+      let ch = (slide ? 0.62 : t.team.isUser ? (mate ? 0.55 : 0.78) : 0.42) + Math.max(0, front) * 0.12 + (t.stats.tackling - hold) * 0.007;
+      if (front < -0.3) ch *= t.team.isUser ? 0.55 : 0.45; // carrier is shielding it
       const settling = this.time < (c.settleUntil || 0);
-      if (settling) ch += 0.25;                        // ball not under control yet: there to be won
+      if (settling) ch += mate ? 0.12 : 0.25;          // ball not under control yet: there to be won
       else if (this.time < b.protectUntil) ch *= 0.25; // just got it under control
       ch = U.clamp(ch, 0.06, 0.85);
-      if (auto) ch = U.clamp(0.82 + (t.stats.tackling - hold) * 0.006, 0.5, 0.94) * (this.time < b.protectUntil && !settling ? 0.6 : 1) * (front < -0.3 ? 0.8 : 1);
+      if (auto) ch = U.clamp(0.82 + (t.stats.tackling - hold) * 0.006, 0.5, 0.94) * (this.time < b.protectUntil && !settling ? 0.6 : 1) * (front < -0.3 ? 0.55 : 1);
+      if (holdUp) ch *= 0.85;
+      if (auto && mate) ch *= 0.75;
       const userLost = c.team.isUser, userWon = t.team.isUser;
       const won = Math.random() < ch;
       // Fouls: going through the man. Likeliest when the tackle misses the ball, from behind,
@@ -499,9 +550,11 @@
       const behind = front < -0.3;
       let fp = won ? (behind ? (slide ? 0.35 : 0.12) : slide ? 0.05 : 0.015) : (slide ? 0.4 : auto ? 0.06 : 0.18) * (behind ? 1.8 : 1);
       fp *= U.clamp(1.5 - t.stats.tackling / 100, 0.6, 1.2);
+      if (t.yellow) fp *= 0.6; // on a booking: stays on his feet
       if (PP.AI.inBox(t.team, c.x, c.y)) fp *= 0.3; // defenders are careful in their own box
       if (Math.random() < fp) { this.foul(t, c, slide, behind, won); return; }
       if (won) {
+        if (!this.drill) this.ps(t).tackles++;
         c.stun = slide ? 1.4 : auto ? 1.2 : 1.0; c.kickCd = 0.8; // he's on the floor for a moment
         this.sfx('tackle');
         if (auto) { this.pop(c, 'TACKLED!', '#ffd23f'); this.gainPossession(t); this.scrappy(t, 0.55); return; }
@@ -550,6 +603,7 @@
         }
         const g = t.team.gk; g.x = t.team.ownX + t.team.dir * 0.3; g.y = C.H / 2; g.ox = g.x; g.oy = g.y;
         this.say('PENALTY!', 2);
+        this.stoppage += 0.5;
       } else {
         this.restartOrEnd('freekick', vs, c, U.clamp(c.x, 1, C.W - 1), U.clamp(c.y, 1, C.H - 1), 'foul');
         c.stun = 0;
@@ -557,16 +611,18 @@
     }
 
     book(p, card) {
-      const minute = Math.min(90, this.minute + 1);
+      const minute = this.minuteLabel();
+      this.stoppage += 0.4;
       if (card === 'yellow') {
         p.yellow = (p.yellow || 0) + 1;
         this.events.push({ type: 'card', card: 'yellow', team: this.idx(p.team), minute, name: p.name });
-        this.pop(p, 'YELLOW CARD', '#ffd23f');
-        if (p.yellow < 2) return;
+        this.cardShow = { card: 'yellow', x: p.x, y: p.y, t: 2.6 };
+        if (p.yellow < 2) { this.say(`Yellow card: ${p.name}`, 2.4); this.bannerLock = this.time + 1.8; return; }
       }
+      this.cardShow = { card: 'red', x: p.x, y: p.y, t: 2.6 };
       this.events.push({ type: 'card', card: 'red', team: this.idx(p.team), minute, name: p.name });
-      this.pop(p, 'RED CARD!', '#e4572e');
-      this.say(`${p.name} is sent off!`, 2.2);
+      this.say(p.yellow >= 2 ? `Second yellow: ${p.name} is sent off!` : `Red card: ${p.name} is sent off!`, 2.6);
+      this.bannerLock = this.time + 2.2;
       p.sentOff = true; p.stun = 0; p.slide = 0; p.lunge = 0; p.receiving = null;
       p.x = C.W / 2 + (p.team.dir === 1 ? -4 : 4); p.y = -3; p.vx = p.vy = 0; p.ox = p.x; p.oy = p.y;
       if (this.controlled === p) this.controlled = this.bestDefender(this.ball.x, this.ball.y) || this.home.outfield()[0];
@@ -600,12 +656,25 @@
       // Bringing a ball under control takes a moment: longer for fast or dropping balls and for
       // poorer first touches. Until then you can't play it (a pass/shot waits).
       const inSpd = Math.hypot(b.vx, b.vy), inZ = b.z;
-      const settle = U.clamp((0.06 + Math.max(0, inSpd - 7) * 0.035 + (inZ > 0.4 ? 0.25 + inZ * 0.2 : 0)) * (1.5 - p.stats.firstTouch / 100) * (p.team.isUser ? 1 : 1.35), 0, 1.1);
+      const settle = U.clamp((0.06 + Math.max(0, inSpd - 7) * 0.035 + (inZ > 0.4 ? 0.25 + inZ * 0.2 : 0)) * (1.5 - p.stats.firstTouch / 100) * (p.team.isUser ? 1 : PP.AI.TUNE.sharp ? 1.2 : 1.35), 0, 1.1);
       p.settleUntil = this.time + settle; p.settleLen = settle;
       b.owner = p; b.lastTouch = p;
       b.vx = b.vy = b.vz = 0; b.z = 0; b.curve = 0;
-      b.protectUntil = this.time + settle + (p.team.isUser ? 0.5 : 0.2); // protection starts once it's controlled
+      b.protectUntil = this.time + settle + (p.team.isUser ? 0.5 : PP.AI.TUNE.sharp ? 0.3 : 0.2); // protection starts once it's controlled
       p.think = Math.max(U.rand(0.3, 0.6), p.settleLen + 0.1); p.plan = null; p.gotBallAt = this.time;
+      // A CPU player taking a pass with a man tight on him plays it first time (a lay-off or a
+      // wall pass) rather than stopping it for the marker to take off him: how you beat a
+      // man-marking press. Better first touch, more often.
+      const lk0 = b.lastKick;
+      if (!p.team.isUser && PP.AI.TUNE.playOut && this.state === 'play' && !p.isGK && lk0 && lk0.type === 'pass' && lk0.team === p.team && inZ < 0.6) {
+        const n = PP.AI.nearestOpp(this, p);
+        if (n.d < 3 && Math.random() < 0.35 + p.stats.firstTouch / 200) {
+          p.settleUntil = this.time + 0.05; p.settleLen = 0.05; b.protectUntil = this.time + 0.3;
+          p.think = 0.06; p.oneTouch = this.time;
+        }
+      }
+      // A CPU forward in front of goal doesn't take a look around first: it's a shot or a pass.
+      if (!p.team.isUser && PP.AI.TUNE.sharp && p.oneTouch !== this.time && U.dist(p.x, p.y, p.team.attackX, C.H / 2) < 20) p.think = p.settleLen + U.rand(0.05, 0.15);
       for (const q of this.players) q.receiving = null;
       if (p.team.isUser) {
         this.controlled = p;
@@ -888,7 +957,7 @@
       const lkt = b.lastKick;
       const ownTouch = !b.owner && lkt && lkt.type === 'touch' && lkt.by === p && this.time - lkt.t < 0.8;
       const hasBall = b.owner === p;
-      if (this.touchCancel) { // touch: let go on your player without dragging
+      if (this.touchCancel || (this.charging && I.hit('cancel'))) { // touch: let go on your player without dragging; keys: Esc
         this.touchCancel = false;
         if (this.charging) { this.charging = false; this.charge = 0; this.chargeKind = null; this.preview = null; this.touchAim = null; this.releaseQueued = false; if (hasBall) p.stop(); }
       }
@@ -962,7 +1031,9 @@
         if (this.charging) {
           const shotNow = this.chargeKind === 'shot' || (this.chargeKind === 'smart' && this.preview && this.preview.shot);
           const fill = shotNow ? 0.6 : 0.38;
-          if (I.down(this.chargeBtn) && !this.releaseQueued) this.charge = Math.min(1, this.charge + dt / fill);
+          // Holding left click and you've overcooked it: a right click starts the strength again from 0.
+          if (this.chargeBtn === 'click' && I.pr.Mouse2 && I.down('click') && !this.releaseQueued) this.charge = 0;
+          else if (I.down(this.chargeBtn) && !this.releaseQueued) this.charge = Math.min(1, this.charge + dt / fill);
           // ... and turns smoothly towards the held direction, so any angle is reachable.
           const nKeys = (ax.x ? 1 : 0) + (ax.y ? 1 : 0);
           this.lastAxPrev = this.lastAx;
@@ -1264,6 +1335,8 @@
       const b0 = this.ball; b0.ox = b0.x; b0.oy = b0.y; b0.oz = b0.z;
       if (this.banner) { this.banner.t -= dt; if (this.banner.t <= 0) this.banner = null; }
       if (this.state === 'halftime' || this.state === 'fulltime') return;
+      if (this.drill) this.drill.step();
+      this.sanity();
       this.record();
 
       if (this.state === 'goal') {
@@ -1272,7 +1345,7 @@
         for (const p of this.players) p.physics(dt);
         this.ball.step(dt);
         this.keepBallInNet();
-        if (this.stateT <= 0) {
+        if (this.stateT <= 0 && !this.drill) {
           this.startReplay(() => {
             if (this.fullCourt) this.kickoff(this.goalConceder);
             else this.endPhase('goal');
@@ -1285,7 +1358,7 @@
         this.stateT -= dt;
         for (const p of this.players) { p.stop(); p.physics(dt); }
         if (this.stateT <= 0) {
-          if (this.clock >= this.half * 45 * 60) { this.state = this.half === 1 ? 'halftime' : 'fulltime'; this.sfx('whistle', 3); }
+          if (this.clock >= this.endOf() && this.added != null) this.endPeriod();
           else this.startPhase();
         }
         return;
@@ -1310,6 +1383,7 @@
       this.looseBallAssist();
       this.handleUser(dt, I);
       PP.AI.update(this, dt);
+      if (this.drill) this.drill.control();
       const ctl = this.controlled;
       if (this.defNudge && ctl && ctl.userAuto) { // your input bends the assisted run
         const sp = ctl.topSpeed(true), n = this.defNudge;
@@ -1337,6 +1411,7 @@
       }
       this.updateShielding();
       for (const pp of this.popups) { pp.t -= dt; pp.y -= dt * 1.2; }
+      if (this.cardShow) { this.cardShow.t -= dt; if (this.cardShow.t <= 0) this.cardShow = null; }
       this.popups = this.popups.filter((pp) => pp.t > 0);
       this.tickClock(dt);
       if (this.ball.owner) this.stats.poss[this.idx(this.ball.owner.team)] += dt;
@@ -1445,6 +1520,7 @@
 
       const bspd = Math.hypot(b.vx, b.vy), lk1 = b.lastKick;
       let best = null, bd = 1e9, stretch = null;
+      const duel = []; // everyone who can get a head to a high ball
       for (const p of this.players) {
         // Slow balls are easier to reach; a firm pass is only easy for the player it's meant for.
         // Team-mates of the passer are expecting it too; opponents have to read it.
@@ -1456,6 +1532,7 @@
             bspd > 8 && this.time - lk0.t < 3) continue; // dummy: it's for the man behind
         if (b.z > 1.9 || (b.z > 0.4 && b.vz > 0)) continue; // can't control a rising ball
         const d = U.dist(p.x, p.y, b.x, b.y);
+        if (b.z > 1.1 && d < reach + 0.3) duel.push({ p, d });
         if (d < reach && d < bd) { bd = d; best = p; }
         else if (!best && d < reach + 0.6 && (p.receiving || (lk1 && lk1.team === p.team) || bspd < 6)) stretch = stretch && stretch.d < d ? stretch : { p, d };
       }
@@ -1468,6 +1545,19 @@
         return;
       }
       if (!best) return;
+      // An aerial duel: when players from both sides go up for it, it isn't simply the nearest
+      // man's. Heading and strength count, being a touch closer helps, and the defender (it's
+      // his box) has the edge of attacking the ball. Lose it and you're bundled off it.
+      if (duel.length > 1 && duel.some((c) => c.p.team !== duel[0].p.team)) {
+        let top = null, ts = -1e9;
+        for (const c of duel) {
+          const st = c.p.stats, own = PP.AI.inBox(c.p.team, b.x, b.y, 6) ? 0.18 : 0;
+          const s = st.heading / 100 + (st.strength / 100) * 0.4 - c.d * 1.1 + own + U.gauss() * 0.22;
+          if (s > ts) { ts = s; top = c.p; }
+        }
+        for (const c of duel) if (c.p.team !== top.team && c.d < 1.2) { c.p.kickCd = 0.5; c.p.jump = Math.max(c.p.jump || 0, 0.3); }
+        best = top;
+      }
       if (lk1 && lk1.type === 'shot' && lk1.team !== best.team && !best.isGK) { this.crowdOoh(lk1); this.pop(best, 'BLOCKED!', '#cfd8d6'); }
       const aiPlayer = this.autoplay || best !== this.controlled;
       if (b.z > 1.1 && aiPlayer) {
@@ -1592,7 +1682,7 @@
       const home = this.home, away = this.away, AI = PP.AI;
       const sb = away.style.block;
       const kind = Math.random() < { high: 0.65, mid: 0.45, low: 0.25 }[sb] ? 'buildup' : 'breakdown';
-      away.block = kind === 'buildup' ? (sb === 'low' ? 'mid' : 'high') : (sb === 'high' ? 'mid' : sb);
+      away.block = this.fixedBlock ? sb : kind === 'buildup' ? (sb === 'low' ? 'mid' : 'high') : (sb === 'high' ? 'mid' : sb);
       home.block = home.style.block;
       this.phaseInHalf++;
       this.phase = { kind, start: this.time };
@@ -1626,7 +1716,7 @@
       this.setRestart('phase', home, taker, b.x, b.y);
       b.protectUntil = this.time + 2.5; // a beat to look up before the press can tackle
       this.camSnap = true;
-      this.say(kind === 'buildup' ? `Build-up vs ${away.block === 'high' ? 'high press' : 'mid block'}` : `Break them down: ${away.block} block`, 1.8);
+      this.say(kind === 'buildup' ? `Build-up vs ${away.block === 'high' ? 'high press' : away.block + ' block'}` : `Break them down: ${away.block === 'high' ? 'high press' : away.block + ' block'}`, 1.8);
     }
 
     // Your attack is over. Resolve the CPU's offscreen attack and move the clock on.
@@ -1640,21 +1730,24 @@
       const base = conceded ? 0 : { turnover: zone < 0.33 ? 0.16 : zone < 0.66 ? 0.07 : 0.03, corner: 0.06, out: 0.03, wide: 0.02, saved: 0.02, timeout: 0.03, goal: 0.02 }[reason] ?? 0.03;
       const pGoal = U.clamp(base * Match.strengthFactor(this.ratings[1], this.ratings[0]), 0.01, 0.6);
       const per = (45 * 60) / Match.PHASES_PER_HALF;
-      const next = (this.half - 1) * 45 * 60 + this.phaseInHalf * per;
+      const next = (this.half === 1 ? 0 : this.nominalEnd(this.half - 1)) + this.phaseInHalf * per;
       const newClock = Math.max(this.clock + 60, next);
       const away = this.away;
       let text = { turnover: 'They kept the ball', corner: 'Their corner', saved: 'Keeper has it', out: 'Out of play', wide: 'Wide', timeout: 'Attack fizzled', foul: 'Foul: their free kick', offside: 'Offside', goal: null }[reason];
       if (Match.OFFSCREEN_GOALS && Math.random() < pGoal) {
         const atk = away.players.filter((p) => ['ST', 'LW', 'RW', 'AM', 'LM', 'RM'].includes(p.role));
         const scorer = U.pick(atk.length ? atk : away.outfield());
-        const minute = Math.min(this.half * 45, Math.floor(U.lerp(this.clock, newClock, Math.random()) / 60) + 1);
+        const minute = `${Math.min(this.nominalEnd() / 60, Math.floor(U.lerp(this.clock, newClock, Math.random()) / 60) + 1)}`;
         this.score[1]++;
         this.stats.shots[1]++; this.stats.onTarget[1]++;
+        this.ps(scorer).goals++; this.ps(scorer).shots++;
         this.events.push({ type: 'goal', team: 1, minute, scorer: scorer.name, og: false, offscreen: true });
         text = `${away.short} score! ${scorer.name} ${minute}'`;
         this.sfx('distantRoar');
       }
-      this.clock = Math.min(newClock, this.half * 45 * 60);
+      // Up to the end of the period, then (once the board's gone up) into stoppage time.
+      this.clock = Math.min(newClock, this.added != null ? this.endOf() : this.nominalEnd());
+      this.checkAdded();
       this.state = 'between';
       this.stateT = text && text.includes('score') ? 2.6 : 1.4;
       if (text) this.say(text, this.stateT);
@@ -1696,7 +1789,16 @@
       const og = lt && lt.team !== team;
       const lk = this.ball.lastKick;
       if (lk && lk.type === 'shot' && lk.team === team && !lk.counted) this.stats.onTarget[i]++;
-      this.events.push({ type: 'goal', team: i, minute: Math.min(90, this.minute + 1), scorer: lt ? lt.name : '?', og });
+      let assist = null;
+      if (lt && !og) {
+        assist = lk && lk.type === 'shot' && lk.by === lt ? this.shotAssist
+          : this.chain && this.chain.team === lt.team && this.chain.by !== lt ? this.chain.by : null;
+        this.ps(lt).goals++;
+        if (assist) this.ps(assist).assists++;
+      }
+      this.chain = this.shotAssist = null;
+      this.stoppage += 0.6; // celebrations
+      this.events.push({ type: 'goal', team: i, minute: this.minuteLabel(), scorer: lt ? lt.name : '?', og, assist: assist ? assist.name : null });
       this.state = 'goal';
       this.stateT = 2.6;
       this.goalRecAt = (this.recCount || 0) + 60; // replay ends a second after it hits the net
@@ -1718,30 +1820,65 @@
       }
     }
 
-    tickClock(dt) {
-      this.clock += dt * ((45 * 60) / this.halfLen);
-      const end = this.half === 1 ? 45 * 60 : 90 * 60;
-      if (this.clock >= end) {
-        this.clock = end;
-        this.state = this.half === 1 ? 'halftime' : 'fulltime';
-        this.sfx('whistle', 3);
-        this.charging = false;
+    // Safety net: if a bug ever turns the ball or a player's position into NaN, put them back
+    // where they last were rather than freezing the match (and say so in the console).
+    sanity() {
+      const b = this.ball, ok = (v) => Number.isFinite(v), lt = b.lastTouch;
+      if (lt && this.chain && lt.team !== this.chain.team) this.chain = null;       // they touched it: the move is over
+      if (lt && this.shotAssist && lt.team !== this.shotAssist.team) this.shotAssist = null;
+      if (ok(b.x) && ok(b.y) && ok(b.z) && ok(b.vx) && ok(b.vy) && ok(b.vz)) b.good = { x: b.x, y: b.y };
+      else {
+        console.warn('Pixel Pitch: ball position went bad, dropping it back in', b.good);
+        const g = b.good || { x: C.W / 2, y: C.H / 2 }, o = b.owner;
+        b.reset(g.x, g.y); if (o && ok(o.x)) b.owner = o;
+      }
+      for (const p of this.players) {
+        if (ok(p.x) && ok(p.y) && ok(p.vx) && ok(p.vy)) { p.good = { x: p.x, y: p.y }; continue; }
+        console.warn('Pixel Pitch: player position went bad', p.name);
+        const g = p.good || { x: C.W / 2, y: C.H / 2 };
+        p.x = g.x; p.y = g.y; p.vx = p.vy = 0; p.tgx = null; p.plan = null;
       }
     }
 
-    startSecondHalf() {
-      this.half = 2;
-      for (const p of this.players) p.energy = Math.min(1, p.energy + 0.5); // half-time breather
-      this.clock = 45 * 60;
+    tickClock(dt) {
+      if (this.drill) return; // practice has no clock
+      this.clock += dt * ((45 * 60) / this.halfLen);
+      this.checkAdded();
+      if (this.clock < this.endOf() || this.added == null) return;
+      // The referee doesn't blow with a shot on its way in or the ball in a box.
+      const b = this.ball, lk = b.lastKick;
+      const shot = lk && lk.type === 'shot' && !b.owner && this.time - lk.t < 2;
+      const box = this.state === 'play' && (PP.AI.inBox(this.home, b.x, b.y, 2) || PP.AI.inBox(this.away, b.x, b.y, 2));
+      if ((shot || box) && this.clock < this.endOf() + 20) return;
+      this.endPeriod();
+    }
+
+    // The whistle at the end of a period: half time, full time, or (in a knockout decider
+    // that's level) on into extra time.
+    endPeriod() {
+      this.sfx('whistle', 3);
+      this.charging = false;
+      const more = this.half === 1 || this.half === 3 || (this.half === 2 && this.ko && this.koLevel());
+      this.state = more ? 'halftime' : 'fulltime';
+    }
+
+    // The next period after the break (the second half, or each half of extra time).
+    startNextHalf() {
+      this.half++;
+      const rest = this.half === 2 ? 0.5 : this.half === 3 ? 0.25 : 0.1; // a breather
+      for (const p of this.players) p.energy = Math.min(1, p.energy + rest);
+      this.clock = this.nominalEnd(this.half - 1);
+      this.added = null; this.stoppage = 0;
       this.phaseInHalf = 0;
-      if (this.fullCourt) this.kickoff(this.teams[1 - this.firstKickoff]);
+      if (this.fullCourt) this.kickoff(this.teams[this.half % 2 === 0 ? 1 - this.firstKickoff : this.firstKickoff]);
       else this.startPhase();
     }
+    startSecondHalf() { this.startNextHalf(); }
   }
 
   // Ground passes arrive firm: longer passes arrive faster.
   // User ground passes: tap = 10 m/s (rolls ~15m), full = 21 m/s (a firm ~40m ball).
-  Match.userGroundSpeed = (power) => 11 + Math.pow(U.clamp(power, 0, 1), 0.8) * 15; // tap 11, full 26 m/s
+  Match.userGroundSpeed = (power) => 11 + Math.pow(U.clamp(power, 0, 1), 0.8) * 13; // tap 11, full 24 m/s
   // Sideways acceleration for a pass: right-footers curl it right-to-left (positive), left-footers
   // the other way; more for lofted balls and when played across the body.
   Match.LOFT_BACK = 0.3; // backspin on a lofted pass (a touch of float, not a shuttlecock)
@@ -1761,8 +1898,11 @@
     if (lofted && p.team.depth(p.x) > 0.65 && (p.y < 14 || p.y > C.H - 14)) return p.stats.crossing;
     return lofted ? p.stats.longPass : p.stats.shortPass;
   };
-  Match.PHASES_PER_HALF = 7;
-  Match.CPU_ERR = 2.2;          // CPU passing/shooting error multiplier (difficulty)
+  Match.PHASES_PER_HALF = 7;   // per 45 minutes (extra time gets its share)
+  Match.PERIOD_END = [45, 90, 105, 120];
+  Match.CPU_ERR = 2.2;          // CPU passing error multiplier (difficulty)
+  Match.CPU_SHOT_ERR = 1.7;     // CPU shooting error multiplier
+  Match.CPU_PASS_ERR = 1.8;     // ... and passing (v0.2: sharper than CPU_ERR)
   Match.OFFSCREEN_GOALS = false; // a team only scores by putting the ball in the net
   Match.AIM_TURN = 1.6;     // rad/s the aim starts turning at (fine adjustments)
   Match.AIM_TURN_MAX = 6.5; // rad/s after holding the direction a moment

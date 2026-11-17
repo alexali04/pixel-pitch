@@ -8,13 +8,17 @@
 
   // Play styles: the block and compactness drive the AI; the epithet tells you what to expect.
   const STYLES = [
-    { block: 'low', compact: 0.8, fwdDefend: 'help', epithet: 'Deep, compact low block; hits on the break' },
-    { block: 'low', compact: 0.6, fwdDefend: 'help', epithet: 'Sits deep and stays narrow' },
-    { block: 'mid', compact: 0.6, fwdDefend: 'help', epithet: 'Balanced, compact mid block' },
-    { block: 'mid', compact: 0.4, fwdDefend: 'high', epithet: 'Open mid block, keeps forwards up' },
-    { block: 'high', compact: 0.4, fwdDefend: 'high', epithet: 'Aggressive high press, leaves gaps behind' },
-    { block: 'high', compact: 0.65, fwdDefend: 'high', epithet: 'Compact high press, suffocating' },
+    { block: 'low', compact: 0.8, fwdDefend: 'help', aggression: 0.25, epithet: 'Deep, compact low block; hits on the break' },
+    { block: 'low', compact: 0.6, fwdDefend: 'help', aggression: 0.35, epithet: 'Sits deep and stays narrow' },
+    { block: 'mid', compact: 0.6, fwdDefend: 'help', aggression: 0.5, epithet: 'Balanced, compact mid block' },
+    { block: 'mid', compact: 0.4, fwdDefend: 'high', aggression: 0.55, epithet: 'Open mid block, keeps forwards up' },
+    { block: 'high', compact: 0.4, fwdDefend: 'high', aggression: 0.9, epithet: 'Aggressive high press, leaves gaps behind' },
+    { block: 'high', compact: 0.65, fwdDefend: 'high', aggression: 0.8, epithet: 'Compact high press, suffocating' },
   ];
+  // Pressing aggression varies club to club around its style (fixed per club, so you learn who
+  // will be all over you).
+  const PRESS_WORD = (a) => (a < 0.3 ? 'passive' : a < 0.55 ? 'measured' : a < 0.8 ? 'aggressive' : 'relentless');
+  PP.pressWord = PRESS_WORD;
 
   // The 2026/27 Premier League. Player names are made up.
   // [name, short, shirt, shorts, rating, formation, style index, rival]
@@ -55,9 +59,10 @@
   function clubDef(c, i) {
     const [name, short, shirt, shorts, rating, formation, si, rival] = c;
     const st = STYLES[si];
+    const aggression = Math.round(U.clamp(st.aggression + ((((i * 37) % 11) / 10) - 0.5) * 0.3, 0.1, 1) * 100) / 100;
     return {
       id: short.toLowerCase(), name, short, formation, rating, rival: rival ? rival.toLowerCase() : null,
-      style: { block: st.block, compact: st.compact, fwdDefend: st.fwdDefend, epithet: st.epithet },
+      style: { block: st.block, compact: st.compact, fwdDefend: st.fwdDefend, aggression, epithet: `${st.epithet} · ${PRESS_WORD(aggression)} pressing` },
       kit: { shirt, shade: shade(shirt), shorts, socks: shirt, ...(KIT_EXTRA[short] || {}) },
       gkKit: i % 2 ? { shirt: '#7bd389', shade: '#3f8a4c', shorts: '#1b1b2f', socks: '#7bd389' } : { shirt: '#ffd23f', shade: '#b8900c', shorts: '#222222', socks: '#ffd23f' },
     };
@@ -157,6 +162,7 @@
         over: false,
         calendar: makeCalendar(38),
         day: 0,
+        pstats: { pl: {}, cl: {} }, // player stats this season, by competition -> club -> name
       };
       L.s = s;
       s.expected = L.expectedPosition(userId);
@@ -233,17 +239,76 @@
       return { ...t, kit: { shirt: alt, shade: alt === '#f4f4f4' ? '#b9b9b9' : '#0b0b16', shorts: t.kit.shirt, socks: alt } };
     },
 
+    // ---- player stats ----
+    // Season totals per player: apps, goals, assists, shots, tackles won, clean sheets (keepers).
+    // Kept per competition ('pl', 'cl'), club id and player name.
+    pstats(comp) {
+      const s = L.s;
+      if (!s.pstats) s.pstats = { pl: {}, cl: {} }; // saves from before player stats
+      return s.pstats[comp] || (s.pstats[comp] = {});
+    },
+    // A played match: every line from the match (lines = [{ name, role, goals, ... }]).
+    addLines(comp, clubId, lines, conceded) {
+      const club = L.pstats(comp)[clubId] || (L.pstats(comp)[clubId] = {});
+      for (const l of lines) {
+        const r = club[l.name] || (club[l.name] = { apps: 0, g: 0, a: 0, sh: 0, tk: 0, cs: 0 });
+        r.apps++; r.g += l.goals || 0; r.a += l.assists || 0; r.sh += l.shots || 0; r.tk += l.tackles || 0;
+        if (l.role === 'GK' && conceded === 0) r.cs++;
+      }
+    },
+    // A simulated match: hand the goals (and assists, three in four) to the XI by position and
+    // finishing / creativity, so the scoring charts fill up for every club.
+    simLines(clubId, goals, conceded) {
+      const t = L.team(clubId), form = PP.FORMATIONS[t.formation];
+      const xi = t.squad.slice(0, 11).map((pl, i) => ({ pl, role: form[i][0] }));
+      const GW = { ST: 1, LW: 0.55, RW: 0.55, AM: 0.5, LM: 0.35, RM: 0.35, CM: 0.18, DM: 0.08, CB: 0.07, LB: 0.06, RB: 0.06, GK: 0 };
+      const AW = { AM: 0.6, LW: 0.55, RW: 0.55, LM: 0.45, RM: 0.45, CM: 0.4, ST: 0.3, LB: 0.3, RB: 0.3, DM: 0.15, CB: 0.05, GK: 0.01 };
+      const pick = (w, not) => {
+        const ws = xi.map((x) => (x === not ? 0 : w(x)));
+        let r = Math.random() * ws.reduce((a, v) => a + v, 0);
+        for (let i = 0; i < xi.length; i++) { r -= ws[i]; if (r <= 0) return xi[i]; }
+        return xi[0];
+      };
+      const lines = xi.map((x) => ({ name: x.pl.name, role: x.role, goals: 0, assists: 0 }));
+      for (let k = 0; k < goals; k++) {
+        const sc = pick((x) => (GW[x.role] ?? 0.1) * Math.pow(x.pl.stats.finishing / 75, 2));
+        lines[xi.indexOf(sc)].goals++;
+        if (Math.random() < 0.75) {
+          const as = pick((x) => (AW[x.role] ?? 0.1) * (x.pl.stats.vision + x.pl.stats.crossing) / 150, sc);
+          lines[xi.indexOf(as)].assists++;
+        }
+      }
+      L.addLines('pl', clubId, lines, conceded);
+    },
+    // Leaders in a competition: [{ name, club, g, a, apps }] sorted by key.
+    leaders(comp, key, n = 10) {
+      const out = [];
+      for (const [cid, club] of Object.entries(L.pstats(comp))) for (const [name, r] of Object.entries(club)) out.push({ name, club: cid, ...r });
+      return out.filter((r) => r[key] > 0).sort((x, y) => y[key] - x[key] || (key === 'g' ? y.a - x.a : y.g - x.g) || x.apps - y.apps).slice(0, n);
+    },
+    // One player's season, all competitions together.
+    playerSeason(clubId, name) {
+      const sum = { apps: 0, g: 0, a: 0, sh: 0, tk: 0, cs: 0 };
+      for (const comp of ['pl', 'cl']) { const r = (L.pstats(comp)[clubId] || {})[name]; if (r) for (const k in sum) sum[k] += r[k] || 0; }
+      return sum;
+    },
+
     // Record your result (goals for / against) and play out the rest of the round.
+    // lines: the match's player lines ({ home, away } from Match.playerLines), if played.
     // Returns a summary for the results screen.
-    finishRound(gf, ga) {
+    finishRound(gf, ga, lines = null) {
       const s = L.s, fx = L.nextFixture(), e = L.current();
-      if (fx.comp === 'cl') return L.finishEurope(gf, ga, fx, e);
+      if (fx.comp === 'cl') return L.finishEurope(gf, ga, fx, e, lines);
+      if (lines) { L.addLines('pl', s.userId, lines.home, ga); L.addLines('pl', fx.opp, lines.away, gf); }
       const games = s.fixtures[e.r];
       for (const g of games) {
         if (g.hs != null) continue;
         if (g === games.find((x) => x.h === fx.h && x.a === fx.a)) {
           g.hs = fx.home ? gf : ga; g.as = fx.home ? ga : gf;
-        } else [g.hs, g.as] = L.simulate(g.h, g.a);
+        } else {
+          [g.hs, g.as] = L.simulate(g.h, g.a);
+          L.simLines(g.h, g.hs, g.as); L.simLines(g.a, g.as, g.hs);
+        }
       }
       const pts = gf > ga ? 3 : gf === ga ? 1 : 0;
       const before = { coins: s.coins, fans: s.fans, board: s.board };
@@ -269,8 +334,9 @@
     },
 
     // A European night: prize money for results and progress, a lift for fans and board.
-    finishEurope(gf, ga, fx, e) {
+    finishEurope(gf, ga, fx, e, lines = null) {
       const s = L.s, E = PP.Europe, before = { coins: s.coins, fans: s.fans, board: s.board };
+      if (lines) { L.addLines('cl', s.userId, lines.home, ga); L.addLines('cl', fx.opp, lines.away, gf); }
       const { games, mine } = E.playDay(e, { gf, ga });
       const gate = fx.home ? Math.round(200 + s.fans * 4) : 0;
       const won = gf > ga, drew = gf === ga;

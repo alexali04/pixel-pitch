@@ -101,6 +101,14 @@
   const E = (PP.Europe = {
     STAGES, STAGE_NAME,
 
+    // Every European club with a squad (for friendlies): this season's sides where the season
+    // has them (the same players you met in the Champions League), else a squad made once.
+    clubs() {
+      const L = PP.League, cl = L.s && L.s.cl;
+      if (!E._clubs) E._clubs = EURO.map((c, i) => L.clubDef(c, i)).map((t) => { PP.ensureSquad(t); return t; });
+      return E._clubs.map((t) => (cl && cl.teams.find((x) => x.id === t.id)) || t);
+    },
+
     // Set up this season's competition. english = the 4 qualifying league clubs (ids).
     setup(s, english, prevCl) {
       const L = PP.League;

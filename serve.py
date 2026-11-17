@@ -5,16 +5,55 @@
     python3 serve.py 9000         # pick another port
     python3 serve.py --lan        # also reachable from phones on the same Wi-Fi
 """
+import base64
 import http.server
+import json
 import os
 import socket
 import sys
+import time
+
+
+FEEDBACK_DIR = "feedback"
+MAX_UPLOAD = 25 * 1024 * 1024
 
 
 class NoCacheHandler(http.server.SimpleHTTPRequestHandler):
     def end_headers(self):
         self.send_header("Cache-Control", "no-store, must-revalidate")
         super().end_headers()
+
+    # The pause menu's "Export for feedback": POST /feedback with JSON
+    # { "png": "data:image/png;base64,...", "state": {...}, "note": "..." }.
+    # Saved as feedback/<timestamp>.png and .json (names chosen here, never by the page).
+    def do_POST(self):
+        if self.path != "/feedback":
+            self.send_error(404)
+            return
+        n = int(self.headers.get("Content-Length") or 0)
+        if n <= 0 or n > MAX_UPLOAD:
+            self.send_error(413)
+            return
+        try:
+            body = json.loads(self.rfile.read(n))
+            os.makedirs(FEEDBACK_DIR, exist_ok=True)
+            stamp = time.strftime("%Y-%m-%d_%H%M%S")
+            base = os.path.join(FEEDBACK_DIR, stamp)
+            png = body.get("png") or ""
+            if png.startswith("data:image/png;base64,"):
+                with open(base + ".png", "wb") as f:
+                    f.write(base64.b64decode(png.split(",", 1)[1]))
+            with open(base + ".json", "w") as f:
+                json.dump({"note": body.get("note", ""), **(body.get("state") or {})}, f, indent=1)
+        except (ValueError, OSError) as e:
+            self.send_error(400, str(e))
+            return
+        out = json.dumps({"saved": base}).encode()
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(out)))
+        self.end_headers()
+        self.wfile.write(out)
 
 
 def lan_ip():

@@ -187,7 +187,7 @@
     }
 
     // Loose camera: the ball roams a dead zone before the view pans, leaning slightly towards
-    // the goal you're attacking. The whole pitch width is always in view thanks to the tilt.
+    // the goal you're attacking.
     updateCamera(m, dt) {
       const b = m.ball;
       const hw = VW / 2 / PX;
@@ -196,12 +196,26 @@
       const dz = hw * 0.15;
       let tx = this.cam.x;
       if (fx < tx - dz) tx = fx + dz; else if (fx > tx + dz) tx = fx - dz;
-      const ty = C.H / 2 + 2.5 + (b.ry - C.H / 2) * 0.1;
+      // Up and down: the wide camera sees the whole width, so it barely moves. Zoomed in, it
+      // follows the ball, stopping a few metres past each touchline, further past the far one
+      // (under the scoreboard) when the ball is out or right on it, so the throw is in view.
+      const span = (r) => (-1 + Math.sqrt(1 + 2 * PERSP * r)) / PERSP; // metres from the centre row
+      const out = m.state !== 'play' || b.ry < 1.5 || b.ry > C.H - 1.5;
+      // Ease the extra room in and out (rather than jumping when the ball crosses the line), so
+      // play running into a far corner and the restart there is one smooth glide.
+      this.outK = (this.outK ?? 0) + ((out ? 1 : 0) - (this.outK ?? 0)) * (m.camSnap ? 1 : Math.min(1, dt * 2.2));
+      const top = 4 + 17 * this.outK, bot = 4 + (U.clamp(b.ry - C.H + 4, 4, M - 1) - 4) * this.outK;
+      const lo = -top - span(-VH / 2 / PY), hi = C.H + bot - span(VH / 2 / PY);
+      let ty = lo < hi ? U.clamp(b.ry + 2, lo, hi) : C.H / 2 + 2.5 + (b.ry - C.H / 2) * 0.1;
+      if (m.state === 'restart' && m.restart && m.restart.kind === 'kickoff') { tx = C.W / 2; ty = C.H / 2 + 2.5; } // dead centre
       const k = m.camSnap ? 1 : Math.min(1, dt * 4.5);
+      // Vertically, cap the speed too: a big jump in target (a restart, the ball out) is a glide.
+      const ky = m.camSnap ? 1 : Math.min(1, dt * 3.2), vyMax = 26 * dt;
       m.camSnap = false;
       this.cam.x += (tx - this.cam.x) * k;
-      this.cam.y += (ty - this.cam.y) * k;
-      this.cam.x = U.clamp(this.cam.x, -M + hw + 2, C.W + M - hw - 2);
+      this.cam.y += U.clamp((ty - this.cam.y) * ky, -vyMax, vyMax);
+      this.cam.x = U.clamp(this.cam.x, -12 + hw + 2, C.W + 12 - hw - 2); // a little stand behind each goal, no more
+      if (!Number.isFinite(this.cam.x) || !Number.isFinite(this.cam.y)) { this.cam.x = C.W / 2; this.cam.y = C.H / 2 + 2.5; }
     }
 
     // alpha = how far we are between the last two sim steps (displays faster than 60 Hz
@@ -375,6 +389,14 @@
         g.fillStyle = pp.color; g.fillText(pp.text, x, y);
       }
       g.globalAlpha = 1;
+      // The referee's card, held up over the booked player.
+      const cs = m.cardShow;
+      if (cs && cs.t > 0) {
+        const x = Math.round(this.sx(cs.x, cs.y)), y = Math.round(this.sy(cs.y)) - 44 + Math.round(Math.max(0, cs.t - 2.2) * 30);
+        g.fillStyle = '#000'; g.fillRect(x - 5, y - 1, 11, 15);
+        g.fillStyle = cs.card === 'red' ? '#e4572e' : '#ffd23f'; g.fillRect(x - 4, y, 9, 13);
+        g.fillStyle = 'rgba(255,255,255,0.35)'; g.fillRect(x - 4, y, 2, 13);
+      }
     }
 
     // Project a world point (x, y, z) to the screen.
@@ -384,9 +406,10 @@
       const g = this.ctx;
       g.fillStyle = col;
       let [x0, y0] = a; const [x1, y1] = b;
+      if (![x0, y0, x1, y1].every(Number.isFinite)) return; // never hang the frame on a bad point
       const dx = Math.abs(x1 - x0), dy = -Math.abs(y1 - y0), sx = x0 < x1 ? 1 : -1, sy = y0 < y1 ? 1 : -1;
       let err = dx + dy;
-      for (;;) {
+      for (let guard = 0; guard < 4000; guard++) {
         g.fillRect(x0, y0, w, w);
         if (x0 === x1 && y0 === y1) break;
         const e2 = 2 * err;

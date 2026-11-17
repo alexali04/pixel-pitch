@@ -1,6 +1,6 @@
 // Global namespace and constants. Units are metres and seconds.
 window.PP = window.PP || {};
-PP.VERSION = 'alpha v0.1';
+PP.VERSION = 'alpha v0.2-dev';
 
 PP.C = {
   W: 105, H: 50,                 // pitch length (x) and width (y); narrower than real for more direct play
@@ -10,9 +10,9 @@ PP.C = {
   CIRCLE_R: 8, SPOT: 11,
 
   // Tilted camera: different pixel scales across (x), down (y) and for height (z).
-  PX: 8.5, PY: 4.9, PZ: 7.1,     // ~66m of pitch visible across, full width visible down
+  PX: 8.5, PY: 4.9, PZ: 7.1,     // set by the camera setting (settings.js): wide = ~66m across, full width down
   VIEW_W: 560, VIEW_H: 315,      // internal low-res canvas
-  MARGIN: 12,                    // metres of stadium drawn around the pitch
+  MARGIN: 24,                    // metres of stadium drawn around the pitch (room for the camera over the far touchline)
 
   G: 9.8,
   ROLL_C: 1.6,                   // rolling resistance: dv/dt = -(ROLL_C + ROLL_K * v)

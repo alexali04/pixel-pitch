@@ -5,12 +5,13 @@
     left: ['ArrowLeft', 'KeyA'],
     right: ['ArrowRight', 'KeyD'],
     sprint: ['ShiftLeft', 'ShiftRight', 'TouchSprint'],
-    pass: ['KeyJ', 'KeyZ'],
-    lob: ['KeyK', 'KeyX'],
-    shoot: ['Space', 'KeyC'],
+    pass: ['KeyJ', 'KeyZ'],        // a ground pass, never lifted, never a shot
+    lob: ['Space', 'KeyK'],        // chip / lofted pass (slide on defence)
+    shoot: ['KeyC'],
     shootOnly: ['KeyL'],
     start: ['Enter', 'NumpadEnter'],
-    pause: ['KeyP', 'Escape'],
+    pause: ['KeyP', 'Escape'],     // Esc while holding a pass cancels it instead
+    cancel: ['Escape'],
     restart: ['KeyR'],
     fullcourt: ['KeyF'],
     mute: ['KeyM'],

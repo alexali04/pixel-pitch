@@ -4,7 +4,7 @@
   const ATTACKERS = new Set(['ST', 'LW', 'RW', 'AM']);
 
   // Shape knobs (attack back-line gap behind the ball, its max depth, full-back push, recovery runs).
-  AI.TUNE = { backGap: 0.19, backMax: 0.62, fbPush: true, recover: true };
+  AI.TUNE = { backGap: 0.19, backMax: 0.62, fbPush: true, recover: true, link: true, jockey: true, manMark: true, playOut: true, sharp: true, mates: true };
 
   // Defensive blocks. Depths are fractions of pitch length from our own goal, widths are
   // fractions of the formation's width.
@@ -57,7 +57,7 @@
   AI.runnerDepth = function (m, team) {
     // Our second-last player: runners already past it are offside and can be left.
     const ours = team.players.filter((q) => !q.sentOff).map((q) => team.depth(q.x)).sort((a, b) => a - b);
-    const secondLast = ours[1];
+    const secondLast = ours[1] ?? 0;
     let mn = 1;
     for (const o of m.other(team).players) {
       if (o.isGK || o.vx * (team.ownX - o.x) <= 0 || Math.hypot(o.vx, o.vy) < 5) continue;
@@ -71,7 +71,7 @@
   // halfway floor.
   AI.trueOffsideLine = function (m, team) {
     const ds = m.other(team).players.filter((o) => !o.sentOff).map((o) => team.depth(o.x)).sort((a, b) => b - a);
-    return ds[1];
+    return ds[1] ?? 1; // fewer than two of them (a practice drill): nobody can be offside
   };
 
   // Moments that invite a press: back to goal, pinned on the touchline, or a back pass.
@@ -80,8 +80,14 @@
     const touchline = c.y < 6 || c.y > C.H - 6;
     const lk = m.ball.lastKick;
     const backPass = lk && lk.back && lk.target === c && m.time - lk.t < 1.5;
-    return facingBack || touchline || backPass;
+    return facingBack || touchline || backPass || AI.dawdling(m, c);
   };
+  // How aggressively a team presses, 0..1 (part of its style; older saves fall back on the
+  // block). It sets how soon they jump on a carrier standing on the ball, whether they jockey or
+  // fly in, how fast they close down and how often they lunge.
+  AI.aggr = (team) => team.style.aggression ?? { low: 0.3, mid: 0.5, high: 0.8 }[team.style.block] ?? 0.5;
+  // Standing on the ball: had it a while (less, the more aggressive they are) and barely moving.
+  AI.dawdling = (m, c) => m.time - (c.gotBallAt ?? m.time) > 2.4 - 1.8 * AI.aggr(m.other(c.team)) && Math.hypot(c.vx, c.vy) < 1.5;
 
   AI.update = function (m, dt) {
     m.ballPath = m.ball.owner ? null : m.ball.predict(30, 0.1);
@@ -111,7 +117,7 @@
   // Depth (in this team's attacking frame) of the opponents' second-last player: the offside line.
   AI.offsideLine = function (m, team) {
     const ds = m.other(team).players.filter((o) => !o.sentOff).map((o) => team.depth(o.x)).sort((a, b) => b - a);
-    return Math.max(ds[1], 0.5);
+    return Math.max(ds[1] ?? 1, 0.5);
   };
 
   AI.team = function (m, team, dt) {
@@ -173,9 +179,12 @@
       if (team.block === 'high' && sinceLost < 2.5) n = Math.max(n, 1) + 1;
       else if (sinceLost < 1.5 && cd > 0.6) n = 1;
       else if (team.block !== 'high' && sinceLost < 3 && cd > 0.45) n = 0;
+      // No stand-offs: someone goes to a carrier standing on the ball, from further out the
+      // more aggressive the side (a low block still won't come out to halfway for it).
+      if (AI.dawdling(m, owner) && cd < B.pressZone + 0.15 + 0.35 * AI.aggr(team)) n = Math.max(n, 1);
       const maxEngaged = 2; // never a pack of defenders on one man: one presses, one covers
       n = Math.min(n, maxEngaged);
-      const range = B.range + (trig ? 6 : 0);
+      const range = B.range + (trig ? 6 : 0) + 6 * AI.aggr(team);
       for (const c of cands.slice(0, n)) if (c.d < range || c === cands[0]) pressers.add(c.p);
       if (!pressers.size && cands.length) container = cands[0].p;
       const sp = Math.hypot(owner.vx, owner.vy);
@@ -206,31 +215,44 @@
       }
     }
 
+    // High press: everyone not on the ball picks up a man (see AI.manMarks).
+    const busy = new Set([...pressers, ...blockers, container, screen && screen.p, userCtl && !userCtl.userAuto ? userCtl : null]);
+    let marks = m.state === 'restart' ? AI.setPieceMarks(m, team) : AI.manMarks(m, team, owner, busy);
+    if (!marks.size && m.state === 'play' && AI.crossDanger(m, team)) marks = AI.boxMarks(m, team, new Set([...busy, chaser]));
+    if (marks.size) screen = null;
+
     const lineD = AI.offsideLine(m, team);
+    const support = m.state === 'play' && owner && owner.team === team && !team.isUser && AI.TUNE.playOut ? AI.supportSpots(m, team, owner) : null;
     for (const p of team.players) {
+      p.aiRole = null;
       if (p.sentOff) { p.stop(); continue; }
-      if (m.state === 'restart' && p.wallSpot) { p.steer(p.wallSpot.x, p.wallSpot.y, false, 0.3); p.face(b.x, b.y); continue; }
-      if (p === userCtl && !p.userAuto) continue; // the user drives this one (keeper included)
-      if (p.isGK) { AI.keeper(m, p, dt); continue; }
+      if (m.state === 'restart' && p.wallSpot) { p.aiRole = 'wall'; p.steer(p.wallSpot.x, p.wallSpot.y, false, 0.3); p.face(b.x, b.y); continue; }
+      if (p === userCtl && !p.userAuto) { p.aiRole = 'you'; continue; } // the user drives this one (keeper included)
+      if (p.isGK) { p.aiRole = 'keeper'; AI.keeper(m, p, dt); continue; }
       if (p.lunge > 0) continue;
       if (p.receiving && m.time - p.receiving.t > 4) p.receiving = null;
-      if (p === owner) { if (p !== userCtl) AI.carrier(m, p, dt); continue; }
+      if (p === owner) { p.aiRole = 'carrier'; if (p !== userCtl) AI.carrier(m, p, dt); continue; }
       if (p === userCtl && !p.userAuto) continue;
       if (p.receiving && !owner && m.state === 'play') {
         const it = p._it || AI.interceptTime(m, p);
+        p.aiRole = 'receiving';
         p.steer(it.x, it.y, true, 0.5);
         continue;
       }
-      if (p === chaser) { p.steer(p._it.x, p._it.y, true, 0.5); continue; }
-      if (pressers.has(p)) { AI.press(m, p, owner, false); continue; }
-      if (blockers.has(p)) { AI.press(m, p, owner, Math.hypot(owner.vx, owner.vy) > 5.5, 1.6); continue; }
-      if (p === container) { AI.contain(m, p, owner); continue; }
+      if (p === chaser) { p.aiRole = 'chaser'; p.steer(p._it.x, p._it.y, true, 0.5); continue; }
+      if (pressers.has(p)) { p.aiRole = 'presser'; AI.press(m, p, owner, false); continue; }
+      if (blockers.has(p)) { p.aiRole = 'blocker'; AI.press(m, p, owner, Math.hypot(owner.vx, owner.vy) > 5.5, 1.6); continue; }
+      if (p === container) { p.aiRole = 'container'; AI.contain(m, p, owner); continue; }
+      if (support && support.has(p)) { p.aiRole = 'support'; const sp = support.get(p); p.steer(sp.x, sp.y, U.dist(p.x, p.y, sp.x, sp.y) > 4, 0.6); p.face(owner.x, owner.y); continue; }
+      if (marks.has(p)) { p.aiRole = 'marking ' + marks.get(p).name; AI.manMark(m, p, marks.get(p), owner); continue; }
       if (screen && p === screen.p) {
+        p.aiRole = 'screen';
         const o = screen.o, n = U.norm(owner.x - o.x, owner.y - o.y);
         const tx = o.x + n.x * 1.3, ty = o.y + n.y * 1.3;
         p.steer(tx, ty, U.dist(p.x, p.y, tx, ty) > 3, 0.6); p.face(owner.x, owner.y);
         continue;
       }
+      p.aiRole = 'shape (' + phase + ')';
       const raw = AI.shapeTarget(m, team, p, phase, lineD);
       // Positioning: good positional players track shape shifts quickly; poor ones lag and drift.
       const pos = p.stats.positioning / 100;
@@ -253,6 +275,143 @@
       p.steer(tg.x, tg.y, d > 9 || tg.sprint || recover || (upfield && d > 3), 2.5);
       if (d < 1.5) p.face(b.x, b.y);
     }
+  };
+
+  // Playing out under pressure: when their carrier is being closed down outside our third, the
+  // two nearest team-mates come to him at angles the press isn't covering (a free spot 8-12m
+  // away with a clear lane), so there's always a pass on. Returns Map(player -> spot).
+  AI.supportSpots = function (m, team, owner) {
+    const opp = m.other(team), near = AI.nearestOpp(m, owner);
+    if (near.d > 6 || team.depth(owner.x) > 0.7 || owner.isGK) return null;
+    const cands = team.outfield().filter((q) => q !== owner && !q.isDown() && !q.receiving && U.dist(q.x, q.y, owner.x, owner.y) < 24)
+      .sort((a, c) => U.dist(a.x, a.y, owner.x, owner.y) - U.dist(c.x, c.y, owner.x, owner.y)).slice(0, 2);
+    const out = new Map(), taken = [];
+    const awayFromPress = U.norm(owner.x - near.o.x, owner.y - near.o.y);
+    for (const q of cands) {
+      let best = null, bs = -1e9;
+      for (let k = 0; k < 12; k++) {
+        const a = (k / 12) * Math.PI * 2, r = 8 + (k % 3) * 2;
+        const x = owner.x + Math.cos(a) * r, y = owner.y + Math.sin(a) * r;
+        if (y < 1.5 || y > C.H - 1.5 || x < 2 || x > C.W - 2) continue;
+        if (team.depth(x) < 0.04) continue;
+        let free = 8, lane = 4;
+        for (const o of opp.players) {
+          free = Math.min(free, U.dist(o.x, o.y, x, y));
+          const sp = U.segPoint(o.x, o.y, owner.x, owner.y, x, y);
+          if (sp.t > 0.1 && sp.t < 0.95) lane = Math.min(lane, sp.d);
+        }
+        const fwd = (team.depth(x) - team.depth(owner.x)) * 6;              // forward angles are worth more
+        const awayDot = (Math.cos(a) * awayFromPress.x + Math.sin(a) * awayFromPress.y) * 0.8; // not behind the presser
+        const crowd = taken.some((t) => U.dist(t.x, t.y, x, y) < 7) ? 4 : 0;
+        const s = free * 0.5 + lane * 0.6 + fwd + awayDot - U.dist(q.x, q.y, x, y) * 0.12 - crowd;
+        if (s > bs) { bs = s; best = { x, y }; }
+      }
+      if (best) { out.set(q, best); taken.push(best); }
+    }
+    return out;
+  };
+
+  // Man-to-man for high-press sides while the ball is in midfield or their half: each free
+  // outfield player takes the nearest unmarked opponent (sticky, so pairs don't swap every
+  // frame). With a man to spare the deepest stays back as cover; short of men, the opponents
+  // furthest from our goal go free. Once the ball gets into our third, back to the block.
+  AI.manMarks = function (m, team, owner, busy) {
+    const out = new Map();
+    if (team.block !== 'high' || !owner || owner.team === team || m.state !== 'play' || team.depth(owner.x) < 0.38 || !AI.TUNE.manMark) {
+      team._marks = null; return out;
+    }
+    let ours = team.outfield().filter((p) => !busy.has(p) && !p.isDown() && !p.sentOff);
+    let foes = m.other(team).outfield().filter((o) => o !== owner && !o.sentOff);
+    if (ours.length > foes.length) ours = ours.sort((a, b) => team.depth(a.x) - team.depth(b.x)).slice(ours.length - foes.length);
+    if (foes.length > ours.length) foes = foes.sort((a, b) => team.depth(a.x) - team.depth(b.x)).slice(0, ours.length);
+    // Pairs hold for 1.2s whatever; after that a pair is kept while the marker is still close
+    // to his man (so they don't all swap every 1.2s), and stretched ones get re-matched.
+    const prev = team._marks || new Map(), fresh = m.time - (team._marksT ?? -9) < 1.2;
+    if (!fresh) team._marksT = m.time;
+    const taken = new Set();
+    for (const [p, o] of prev) {
+      if (ours.includes(p) && foes.includes(o) && !taken.has(o) && U.dist(p.x, p.y, o.x, o.y) < (fresh ? 22 : 10)) { out.set(p, o); taken.add(o); }
+    }
+    const pairs = [];
+    for (const p of ours) if (!out.has(p)) for (const o of foes) if (!taken.has(o)) pairs.push([U.dist(p.x, p.y, o.x, o.y), p, o]);
+    pairs.sort((a, b) => a[0] - b[0]);
+    for (const [, p, o] of pairs) if (!out.has(p) && !taken.has(o)) { out.set(p, o); taken.add(o); }
+    team._marks = out;
+    return out;
+  };
+
+  // A cross is on: they have it within ~35m of our goal, or their lofted ball is dropping into
+  // (or near) our box.
+  AI.crossDanger = function (m, team) {
+    const b = m.ball, o = b.owner;
+    if (o) return o.team !== team && team.depth(o.x) < 0.34;
+    const lk = b.lastKick;
+    if (!lk || lk.team === team || !m.ballPath || (b.z < 0.5 && b.vz < 2)) return false;
+    const land = m.ballPath.find((q) => q.z < 2) || m.ballPath[m.ballPath.length - 1];
+    return AI.inBox(team, land.x, land.y, 5);
+  };
+  // Box marking against crosses: every attacker in or around our box gets a man, nearest our
+  // goal first, from whoever is closest and free. Spare defenders hold their zones.
+  AI.boxMarks = function (m, team, busy) {
+    const out = new Map(), owner = m.ball.owner;
+    const ours = team.outfield().filter((p) => !busy.has(p) && !p.isDown() && !p.sentOff);
+    const foes = m.other(team).outfield().filter((o) => o !== owner && !o.sentOff && AI.inBox(team, o.x, o.y, 6))
+      .sort((a, c) => U.dist(a.x, a.y, team.ownX, C.H / 2) - U.dist(c.x, c.y, team.ownX, C.H / 2));
+    const prev = team._boxMarks || new Map(), taken = new Set();
+    for (const [p, o] of prev) if (ours.includes(p) && foes.includes(o) && !taken.has(o)) { out.set(p, o); taken.add(o); }
+    for (const o of foes) {
+      if (taken.has(o)) continue;
+      let best = null, bd = 1e9;
+      for (const p of ours) {
+        if (out.has(p)) continue;
+        const d = U.dist(p.x, p.y, o.x, o.y);
+        if (d < bd) { bd = d; best = p; }
+      }
+      if (best) { out.set(best, o); taken.add(o); }
+    }
+    team._boxMarks = out;
+    return out;
+  };
+
+  // Defending a free kick within ~40m of our goal: the players not in the wall pick up their
+  // most dangerous attackers (nearest our goal first), each taking the closest free defender.
+  // Spare defenders hold their shape.
+  AI.setPieceMarks = function (m, team) {
+    const r = m.restart, out = new Map();
+    // Corners too: the men in the box get picked up; the rest keep their corner zones.
+    if (r && r.kind === 'corner' && r.team !== team) return AI.boxMarks(m, team, new Set(m.controlled && m.controlled.team === team && !m.controlled.userAuto ? [m.controlled] : []));
+    if (!r || r.kind !== 'freekick' || r.team === team || team.depth(m.ball.x) > 0.4) return out;
+    const ctl = m.controlled && m.controlled.team === team && !m.controlled.userAuto ? m.controlled : null;
+    const ours = team.outfield().filter((p) => !p.wallSpot && p !== ctl && !p.sentOff);
+    const foes = r.team.outfield().filter((o) => o !== r.taker && !o.sentOff && team.depth(o.x) < 0.42)
+      .sort((a, c) => U.dist(a.x, a.y, team.ownX, C.H / 2) - U.dist(c.x, c.y, team.ownX, C.H / 2));
+    for (const o of foes) {
+      let best = null, bd = 1e9;
+      for (const p of ours) {
+        if (out.has(p)) continue;
+        const d = U.dist(p.x, p.y, o.x, o.y);
+        if (d < bd) { bd = d; best = p; }
+      }
+      if (best) out.set(best, o);
+    }
+    return out;
+  };
+
+  // Mark a man: touch-tight, goal-side and a little ball-side when he's in range of a pass,
+  // a couple of metres off when he's far from the ball.
+  AI.manMark = function (m, p, o, owner) {
+    owner = owner || m.ball;
+    const g = U.norm(p.team.ownX - o.x, C.H / 2 - o.y), bd = U.norm(owner.x - o.x, owner.y - o.y);
+    const near = U.dist(o.x, o.y, owner.x, owner.y) < 30, box = AI.inBox(p.team, o.x, o.y, 3);
+    // In our box it's tight: half a body goal-side, shoulder to shoulder.
+    const off = box ? 0.8 : near ? 1.3 : 2.6, side = box ? 0.45 : near ? 0.8 : 1.5;
+    let tx = o.x + g.x * off + bd.x * side + o.vx * 0.3, ty = o.y + g.y * off + bd.y * side + o.vy * 0.3;
+    if (m.state === 'restart') { // keep the 9.15m at a free kick
+      const b = m.ball, dx = tx - b.x, dy = ty - b.y, dd = Math.hypot(dx, dy);
+      if (dd < 9.3) { tx = b.x + (dx / (dd || 1)) * 9.3; ty = b.y + (dy / (dd || 1)) * 9.3; }
+    }
+    p.steer(tx, ty, U.dist(p.x, p.y, tx, ty) > 3 || Math.hypot(o.vx, o.vy) > 4.5, 0.8);
+    p.face(owner.x, owner.y);
   };
 
   // Do this team's forwards drop back on defence ('help') or stay up for the counter ('high')?
@@ -292,6 +451,46 @@
     return { d: back, l: s.l, up: true };
   };
 
+  // The link man: one central midfielder (the No. 10 if there is one) who shows for the ball
+  // in the pocket between their midfield and back lines while we build through midfield.
+  // Sticky, so it doesn't flick between players.
+  AI.linkPlayer = function (m, team) {
+    if (team._linkT === m.time) return team._link;
+    team._linkT = m.time;
+    const o = m.ball.owner, ballD = team.depth(m.ball.x);
+    if (!o || o.team !== team || m.state !== 'play' || ballD < 0.22 || ballD > 0.75) return (team._link = null);
+    const ok = (q) => q !== o && !q.isDown() && !q.sentOff && (q.slot.role === 'AM' || q.slot.role === 'CM') && !(q === m.controlled && !q.userAuto);
+    if (team._link && ok(team._link)) return team._link;
+    let best = null, bs = 1e9;
+    for (const q of team.outfield()) {
+      if (!ok(q)) continue;
+      const sc = (q.slot.role === 'AM' ? 0 : 5) + U.dist(q.x, q.y, o.x, o.y) * 0.15 + Math.abs(q.y - C.H / 2) * 0.1;
+      if (sc < bs) { bs = sc; best = q; }
+    }
+    return (team._link = best);
+  };
+
+  // Depth (our frame) of the pocket between their midfield line and their back line.
+  AI.pocketDepth = function (m, team, ballD, lineD) {
+    const ds = m.other(team).outfield().filter((q) => !q.sentOff).map((q) => team.depth(q.x)).sort((a, c) => c - a);
+    const avg = (a) => a.reduce((x, v) => x + v, 0) / a.length;
+    const back = ds.length >= 4 ? avg(ds.slice(0, 4)) : lineD, mid = ds.length >= 6 ? avg(ds.slice(4, 8)) : ballD + 0.15;
+    return Math.min(lineD - 0.03, Math.max(ballD + 8 / C.W, (back + mid) / 2));
+  };
+
+  // A striker coming short: with the ball in midfield he sometimes drops off the line towards
+  // it for a couple of seconds to link play (one striker at a time). True while he's showing.
+  AI.showShort = function (m, team, p, ballD) {
+    if (p.slot.role !== 'ST' || m.state !== 'play') return false;
+    const o = m.ball.owner;
+    if (!o || o.team !== team || o === p || ballD < 0.28 || ballD > 0.7) { p.showUntil = 0; return false; }
+    if (m.time < (p.showUntil || 0)) return true;
+    if (m.time < p.runUntil || m.time < (p.showUntil || 0) + 2.5) return false;
+    if (team.players.some((q) => q !== p && m.time < (q.showUntil || 0))) return false;
+    if (Math.random() < C.DT * 0.4) { p.showUntil = m.time + U.rand(1.4, 2.3); return true; }
+    return false;
+  };
+
   // Positional target for an off-ball player.
   AI.shapeTarget = function (m, team, p, phase, lineD) {
     const b = m.ball, s = p.slot, r = m.restart;
@@ -329,6 +528,15 @@
         if (sq > 0.4 && (d - team.depth(p.x)) * C.W > 6) hurry = true; // get up there with the play
       }
       const o0 = b.owner;
+      // Building through the middle: the link man shows between their lines, and the striker
+      // now and then comes short to the ball (see AI.linkPlayer / showShort).
+      const showing = AI.TUNE.link && AI.showShort(m, team, p, ballD);
+      if ((AI.TUNE.link && p === AI.linkPlayer(m, team) && m.time >= p.runUntil) || showing) {
+        const pd = AI.pocketDepth(m, team, ballD, lineD);
+        d = showing ? Math.min(lineD - 0.02, Math.max(pd, ballD + 13 / C.W)) : pd;
+        l = 0.5 + (bl - 0.5) * (showing ? 0.4 : 0.3);
+        if ((d - team.depth(p.x)) * C.W > 5 || Math.abs(team.toWorld(d, l).y - p.y) > 8) hurry = true;
+      }
       const carrierLooking = o0 && o0.team === team && o0.fx * team.dir > 0.4 && m.pressureOn(o0) < 0.5;
       if (ATTACKERS.has(s.role) && m.state === 'play') {
         // Runs in behind. The cue is a carrier who can play it: facing forward with time,
@@ -339,7 +547,7 @@
         const mine = o0 && o0.team === team && o0 !== p;
         const winding = mine && m.controlled === o0 && m.charging && m.chargeKind !== 'shot';
         const ready = mine && (winding || (carrierLooking && m.time >= (o0.settleUntil || 0))) && U.dist(o0.x, o0.y, p.x, p.y) < 40;
-        if (m.time > p.runUntil + 1.2) {
+        if (m.time > p.runUntil + 1.2 && !showing) {
           const rate = ready ? (winding ? 2.5 : 0.5) + 1.5 * iq : 0.15 + 0.6 * (1 - iq);
           if (Math.random() < C.DT * rate) {
             p.runUntil = m.time + U.rand(1.2, 2.0); p.runStart = m.time;
@@ -387,7 +595,7 @@
       }
     } else {
       const B = AI.BLOCKS[team.block || 'mid'], comp = team.compact ?? 0.5;
-      let line = B.line + (ballD - 0.5) * 0.18;                // breathe with the ball
+      let line = B.line + (ballD - 0.5) * (team.block === 'low' ? 0.06 : 0.18); // breathe with the ball (a low block barely)
       const sinceLost = team.lostAt != null ? m.time - team.lostAt : 99;
       if (sinceLost < 4 && !(team.block === 'high' && sinceLost < 2.5)) line -= 0.1 * (1 - sinceLost / 4); // retreat after losing it
       line = Math.min(line, ballD - 0.07);                      // stay goal-side of it
@@ -483,8 +691,19 @@
   AI.press = function (m, p, owner, hurry, dist = 1.1) {
     const team = p.team;
     let dir = U.norm(team.ownX - owner.x, C.H / 2 - owner.y);
-    const danger = team.depth(owner.x) < 0.35; // near our goal: get tight, fast, straight at him
+    const cd = team.depth(owner.x);
+    const danger = cd < 0.35; // near our goal: get tight, fast, straight at him
     if (danger) { hurry = true; dist = Math.min(dist, 0.7); }
+    const settling = m.time < (owner.settleUntil || 0);
+    // Middle third, carrier in control and facing up: jockey him (stay a couple of metres off,
+    // goal-side, show him away) rather than diving in. A press trigger, a loose first touch or
+    // a high-press side's counter-press still get the full treatment.
+    // A high press (or a very aggressive side) never jockeys: it closes at a sprint and goes in.
+    const ag = AI.aggr(team);
+    const counter = team.block === 'high' && team.lostAt != null && m.time - team.lostAt < 2.5;
+    const jockey = AI.TUNE.jockey && team.block !== 'high' && ag < 0.7 && !danger && !settling && !counter && cd < 0.75 && !AI.pressTrigger(m, owner);
+    if (jockey) { dist = Math.max(dist, 2.1); hurry = false; }
+    else if (ag >= 0.6 && U.dist(p.x, p.y, owner.x, owner.y) > 2.5) hurry = true;
     const opt = AI.bestOutlet(m, owner);
     if (opt && !danger) {
       const to = U.norm(opt.x - owner.x, opt.y - owner.y);
@@ -494,10 +713,9 @@
     const ty = owner.y + dir.y * dist + owner.vy * 0.25;
     const d = U.dist(p.x, p.y, owner.x, owner.y);
     p.steer(tx, ty, d > 13 || hurry, 2.5); // close down at a jog unless far away
-    const settling = m.time < (owner.settleUntil || 0);
-    if (d < (team.isUser ? 2.4 : settling ? 2.2 : 1.6) && p.tackleCd <= 0 && (settling || m.time > m.ball.protectUntil)) {
-      p.tackleCd = settling ? U.rand(0.4, 0.7) : U.rand(1.0, 1.8);
-      if (Math.random() < (settling ? 0.85 : 0.6)) m.startLunge(p, owner, settling ? 0.18 : 0.24);
+    if (d < (team.isUser ? (AI.TUNE.mates && (p !== m.controlled || m.autoplay) ? 2.0 : 2.4) : settling ? 2.2 : 1.6) && p.tackleCd <= 0 && (settling || m.time > m.ball.protectUntil)) {
+      p.tackleCd = settling ? U.rand(0.4, 0.7) : jockey ? U.rand(1.6, 2.6) : U.rand(1.0, 1.8) * (1.3 - 0.5 * ag);
+      if (Math.random() < (settling ? 0.85 : jockey ? 0.15 + 0.3 * ag : 0.35 + 0.4 * ag) * (p.yellow ? 0.7 : 1)) m.startLunge(p, owner, settling ? 0.18 : 0.24);
     }
   };
 
@@ -524,11 +742,21 @@
     // Until he's had time to get the ball under control and look up, he just shields it and
     // drifts forward; no instant passes off a tackle or first touch.
     if (!p.plan && p.think > 0) p.plan = { kind: 'dribble', x: p.x + p.team.dir * 3, y: p.y, sprint: false, settle: true };
+    // A presser arriving: don't finish the look-up, decide now (CPU sides; yours already do).
+    if (!p.team.isUser && AI.TUNE.playOut && p.think > 0.1 && m.time >= (p.settleUntil || 0)) {
+      const n = AI.nearestOpp(m, p);
+      if (n.o) {
+        const to = U.norm(p.x - n.o.x, p.y - n.o.y), closing = n.o.vx * to.x + n.o.vy * to.y;
+        if (n.d < 2.4 || (n.d < 6 && closing > 1 && n.d / closing < 0.8)) p.think = Math.min(p.think, U.rand(0.03, 0.1));
+      }
+    }
     if (p.think <= 0) {
-      p.think = p.team.isUser ? U.rand(0.22, 0.4) : U.rand(0.35, 0.6);
+      const dGoal = U.dist(p.x, p.y, p.team.attackX, C.H / 2);
+      p.think = p.team.isUser ? U.rand(0.22, 0.4) : dGoal < 22 && AI.TUNE.sharp ? U.rand(0.15, 0.3) : U.rand(0.35, 0.6);
       const plan = AI.decide(m, p);
       if (plan.kind === 'shoot') { m.shoot(p, plan.aim, plan.power); p.plan = null; return; }
       if (plan.kind === 'pass') { m.passTo(p, plan.target, plan.lofted); p.plan = null; return; }
+      if (plan.kind === 'behind') { m.kickTo(p, plan.x, plan.y, plan.lofted, 'pass', plan.target); p.plan = null; return; }
       if (plan.kind === 'clear') { m.kickTo(p, plan.x, plan.y, true, 'clear', null); p.plan = null; return; }
       p.plan = plan;
     }
@@ -588,7 +816,40 @@
         out.push({ kind: 'pass', target: q, lofted: true, score: sl, lane: landM });
       }
     }
+    if (!team.isUser && AI.TUNE.playOut && !p.isGK) out.push(...AI.behindOptions(m, p, trueLine));
     return out.sort((a, b) => b.score - a.score);
+  };
+
+  // Balls in behind (CPU sides): into the space beyond their last line for a forward who's
+  // onside and will clearly get there first, keeper included. What beats a high line and a
+  // man-marking press, where every ball to feet is covered.
+  AI.behindOptions = function (m, p, trueLine) {
+    const team = p.team, opp = m.other(team), myD = team.depth(p.x), out = [];
+    if (trueLine > 0.9) return out;
+    for (const q of team.outfield()) {
+      if (q === p || q.isDown() || !['ST', 'LW', 'RW', 'AM', 'LM', 'RM'].includes(q.role)) continue;
+      const qd = team.depth(q.x);
+      if (qd > trueLine + 0.004 || qd < myD - 0.05) continue; // offside, or behind the ball
+      const depth = Math.min(Math.max(trueLine + 0.07, qd + 0.05), 0.9);
+      const t = team.toWorld(depth, U.clamp((q.y + (C.H / 2 - q.y) * 0.25) / C.H, 0.1, 0.9));
+      const D = U.dist(p.x, p.y, t.x, t.y);
+      if (D < 12 || D > 50) continue;
+      const lofted = D > 22;
+      const Tb = lofted ? PP.Ball.loftTime(D) : PP.Ball.groundTime(D, PP.Match.arrivalSpeed(D));
+      const tq = U.dist(q.x, q.y, t.x, t.y) / q.topSpeed(true) + 0.15;
+      // Defenders facing the ball have to turn and run back towards their own goal first.
+      let margin = 1e9;
+      for (const o of opp.players) {
+        if (o.isDown()) continue;
+        const turn = !o.isGK && team.depth(o.x) < depth ? 0.4 : 0;
+        margin = Math.min(margin, U.dist(o.x, o.y, t.x, t.y) / (o.topSpeed(true) * (o.isGK ? 0.9 : 1)) + 0.3 + turn - Math.max(tq, Tb));
+      }
+      if (margin < 0.05) continue;
+      const vis = p.stats.vision / 100;
+      const s = (depth - myD) * 4 + Math.min(margin, 1.5) * 0.9 - 0.9 + (vis - 0.7) + U.rand(-0.2, 0.2);
+      out.push({ kind: 'behind', target: q, x: t.x, y: t.y, lofted, score: s, lane: margin });
+    }
+    return out;
   };
 
   AI.decide = function (m, p) {
@@ -598,6 +859,8 @@
     const myD = team.depth(p.x);
     const near = AI.nearestOpp(m, p);
     if (p.isGK) {
+      // Swept up outside his box with someone closing: no messing about, put it away.
+      if (!AI.inBox(team, p.x, p.y, 0) && near.d < 9) { const t = team.toWorld(0.62, U.clamp(p.y / C.H, 0.15, 0.85)); return { kind: 'clear', x: t.x, y: t.y }; }
       const best = AI.passOptions(m, p, 55)[0];
       if (best && (best.score > -1 || near.d > 6)) return best;
       const t = team.toWorld(0.6, U.rand(0.15, 0.85));
@@ -614,7 +877,7 @@
         if (U.segPoint(o.x, o.y, p.x, p.y, gx, gy).d < 1.2) blockers++;
       }
       let want = dG < 13 ? 0.85 : dG < 19 ? 0.4 : 0.1 * (p.stats.longShots / 70);
-      if (!team.isUser) want *= 0.8;
+      if (!team.isUser) want *= !AI.TUNE.sharp ? 0.8 : ['ST', 'LW', 'RW', 'AM'].includes(p.role) ? 1.05 : 0.85;
       if (blockers) want *= 0.4;
       if (Math.random() < want) {
         const side = opp.gk.y < gy ? 1 : -1;
@@ -635,6 +898,24 @@
     const opts = AI.passOptions(m, p);
     const best = opts[0];
 
+    // Under pressure (CPU sides): a safe ball, even square or back, beats running into him;
+    // with nothing short on in our half, go long over the press.
+    const oneTouch = p.oneTouch != null && m.time - p.oneTouch < 0.3;
+    if (!team.isUser && AI.TUNE.playOut && (pressure < 3.2 || oneTouch) && (myD < 0.75 || oneTouch)) {
+      const safe = opts.find((o) => !o.lofted && o.lane > 0.4 && o.score > -1.5);
+      if (oneTouch && safe) return safe;
+      if (safe && (pressure < 2.3 || !best || safe === best)) return safe;
+      if (myD < 0.55 && pressure < 2.3) {
+        const long = opts.find((o) => o.lofted && o.lane > 0.3 && o.score > -2);
+        if (long) return long;
+        if (myD < 0.35) {
+          const fw = team.outfield().filter((q) => q !== p).sort((a, c) => team.depth(c.x) - team.depth(a.x))[0];
+          const t = team.toWorld(0.68, fw ? U.clamp(fw.y / C.H, 0.12, 0.88) : 0.2);
+          return { kind: 'clear', x: t.x, y: t.y };
+        }
+      }
+    }
+
     // Space ahead for a dribble.
     let space = 12;
     for (const o of opp.players) {
@@ -653,6 +934,11 @@
       const n = U.norm(p.x - near.o.x, p.y - near.o.y);
       ty += n.y * 6;
       tx += Math.max(0, n.x * team.dir) * team.dir * 3;
+    }
+    // Tight and no pass on: turn his back on the presser and shield it, then look again.
+    if (!team.isUser && AI.TUNE.playOut && near.o && pressure < 2.2 && myD < 0.75) {
+      const n = U.norm(p.x - near.o.x, p.y - near.o.y);
+      return { kind: 'dribble', x: U.clamp(p.x + n.x * 4, 1, C.W - 1), y: U.clamp(p.y + n.y * 4, 2, C.H - 2), sprint: false };
     }
     ty = U.clamp(ty, 2, C.H - 2);
     return { kind: 'dribble', x: tx, y: ty, sprint: space > 6 };
@@ -724,6 +1010,9 @@
 
   // ---------- goalkeeper ----------
 
+  // How much of a sweeper-keeper he is, 0..1: a keeper who reads the game, behind a high line.
+  AI.sweeper = (team, gk) => U.clamp((gk.stats.gkPositioning - 55) / 35, 0, 1) * 0.5 + ({ high: 0.5, mid: 0.25 }[team.block] || 0);
+
   AI.keeper = function (m, gk, dt) {
     const team = gk.team, b = m.ball, gx = team.ownX, gy = C.H / 2;
     if (b.owner === gk) { AI.carrier(m, gk, dt); return; }
@@ -742,7 +1031,9 @@
         const yl = b.y + b.vy * tl;
         const zl = b.z + b.vz * tl - 0.5 * C.G * tl * tl;   // height as it reaches the line
         const onTarget = Math.abs(yl - gy) < C.GOAL_W / 2 + 0.6 && zl < C.GOAL_H + 0.4;
-        if (tl > 0 && tl < 2.5 && onTarget) {
+        // A ground ball that will stop short (a through ball, not a shot) isn't one to dive at.
+        const reaches = b.z > 0.3 || b.vz > 1 || PP.Ball.rollDist(sp) > Math.abs(gx - b.x) - 1;
+        if (tl > 0 && tl < 2.5 && onTarget && reaches) {
           // Reaction time before the keeper moves at all.
           if (m.time - b.lastKick.t < 0.14) { gk.stop(); return; }
           const tk = Math.max(0, (gk.x - b.x) / b.vx);
@@ -773,6 +1064,20 @@
         if (AI.interceptTime(m, o).t < it.t - 0.1) { first = false; break; }
       }
       if (first) { gk.steer(it.x, it.y, true, 0.3); return; }
+    }
+
+    // Sweeper-keeper: a loose ball in behind our last defender, within his range, that he'll
+    // reach clearly before anyone else: come off the line for it (outside the box he kicks it).
+    const sw = AI.sweeper(team, gk);
+    if (!b.owner && m.state === 'play' && sw > 0 && !m.drill && !AI.inBox(team, b.x, b.y, 1)) {
+      const it = AI.interceptTime(m, gk);
+      const deepest = Math.min(...team.outfield().filter((q) => !q.sentOff && !q.isDown()).map((q) => team.depth(q.x)));
+      if (team.depth(it.x) * C.W < 14 + 24 * sw && team.depth(it.x) < deepest) {
+        let oppT = 1e9, ourT = 1e9;
+        for (const o of m.other(team).players) if (!o.sentOff) oppT = Math.min(oppT, AI.interceptTime(m, o).t);
+        for (const q of team.outfield()) if (!q.sentOff) ourT = Math.min(ourT, AI.interceptTime(m, q).t);
+        if (it.t < oppT - (0.55 - 0.3 * sw) && ourT > it.t - 0.4) { gk.steer(it.x, it.y, true, 0.3); return; }
+      }
     }
 
     // Opponent running at goal.
@@ -816,7 +1121,13 @@
     // Default: sit on the line between ball and goal centre.
     const n = U.norm(b.x - gx, b.y - gy);
     const db = U.dist(b.x, b.y, gx, gy);
-    const r = U.clamp(1 + db * 0.06, 1, 4.5);
+    let r = U.clamp(1 + db * 0.06, 1, 4.5);
+    // A sweeper-keeper with the ball far away plays well off his line, part-way to the back line.
+    const swD = AI.sweeper(team, gk);
+    if (swD > 0 && !(b.owner && b.owner.team !== team && team.depth(b.x) < 0.5)) {
+      const back = Math.min(...team.outfield().filter((q) => !q.sentOff).map((q) => team.depth(q.x))) * C.W;
+      r = Math.max(r, U.clamp((back - 4) * 0.45 * swD, 0, 6 + 12 * swD) * U.clamp((db - 30) / 25, 0, 1));
+    }
     gk.steer(gx + n.x * r, gy + n.y * r * 0.9, false, 0.8);
     if (Math.hypot(gk.vx, gk.vy) < 0.5) gk.face(b.x, b.y);
   };

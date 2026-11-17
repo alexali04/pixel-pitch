@@ -54,6 +54,10 @@ organise a counter.
   put the nearest man on it briefly (1.5s) if it was lost in the opposition half; the rest drop
   off into their block.
 - Forwards' runs are timed to the passer (see README, "What the stats do").
+- Building through midfield (ball between ~22% and 75% of the way up): one link man (the No. 10,
+  else the nearest No. 8) shows in the pocket between their midfield and back lines
+  (`AI.linkPlayer`, `AI.pocketDepth`), and now and then the striker comes short for a couple of
+  seconds (`AI.showShort`).
 
 ### Next
 
@@ -87,8 +91,33 @@ organise a counter.
   touchline, a back pass) add a presser. The mid block presses only from about halfway
   (`pressZone` 0.52). Block widths are wider than on a real pitch because ours is narrower
   (50 m), so there's room between the lines and for the striker.
-- High press: while the opponent builds from the back, a midfielder screens their holding
-  midfielder (touch-tight, in the passing lane), so the easy pass into him is taken away.
+- High press is man-to-man (`AI.manMarks`) while the ball is in midfield or their half: the
+  nearest presses the ball, everyone else takes the nearest unmarked opponent and stays
+  touch-tight, goal-side and ball-side. With a man to spare the deepest defender stays back as
+  cover. Once the ball gets into our third the team goes back to its block.
+- Pressing aggression (`AI.aggr`, 0..1, per club: its style plus a fixed club-to-club spread;
+  shown as passive / measured / aggressive / relentless pressing). It sets how soon they jump on
+  a carrier standing on the ball (2.4s at 0 down to 0.6s at 1) and from how far out, the press
+  range, whether pressers sprint in (0.6+), how often they lunge and how quickly they go again.
+- No stand-offs: a carrier standing on the ball is a press trigger, and the nearest player goes
+  (a low block still won't come out to halfway for it).
+- High press (and any side at 0.7+ aggression) never jockeys: it closes at a sprint and goes in.
+- Sweeper-keeper (`AI.sweeper`, 0..1: a keeper who reads the game, more behind a mid or high
+  line). With the ball far away he stands well off his line, part-way to the back line, and he
+  comes out for a loose ball in behind the last defender when he'll clearly get there first
+  (outside the box he clears it). A through ball rolling towards goal that will stop short no
+  longer makes him stay on his line as if it were a shot.
+- Crosses (`AI.crossDanger`, `AI.boxMarks`): when they have the ball within ~35m of our goal, or
+  their lofted ball is dropping into our box, every attacker in or around the box gets a man
+  (nearest our goal first), half a body goal-side and shoulder to shoulder. Corners the same; the
+  spare defenders keep their corner zones.
+- Aerial duels: when players from both sides can reach a high ball it isn't simply the nearest
+  man's: heading, strength and being closer count, and the defender in his own box has an edge.
+- Free kicks within ~40m of goal: the players not in the wall pick up the attackers nearest goal
+  (`AI.setPieceMarks`), keeping the 9.15m.
+- Jockeying: in the middle third, against a carrier who has it under control and is facing up,
+  the presser stays ~2m off and goal-side and rarely dives in. A press trigger, a loose first
+  touch, being near our goal or a high-press side's counter-press still mean a full press.
 - Forwards drop back to help or stay high for the counter (a tactic).
 - Counter-press after losing it (high-press teams always, everyone when it's lost high up).
 - Recovery: players behind the ball sprint back; the line retreats after a turnover in your half.

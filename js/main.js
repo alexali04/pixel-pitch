@@ -45,11 +45,11 @@
 
   const CONTROLS = `
     <div class="controls">
-      <span class="h">Move</span><span><kbd>WASD</kbd> / <kbd>Arrows</kbd></span><span><kbd>Shift</kbd> sprint</span>
-      <span class="h">Attack</span><span><kbd>J</kbd> pass &nbsp;<kbd>K</kbd> lofted / chip</span><span><kbd>L</kbd> / <kbd>Space</kbd> shoot</span>
-      <span class="h">Strength</span><span>hold the button</span><span>tap = soft, hold = bullet</span>
-      <span class="h">Defend</span><span><kbd>Space</kbd> tackle &nbsp;<kbd>K</kbd> slide</span><span><kbd>J</kbd> switch</span>
-      <span class="h">Game</span><span><kbd>P</kbd> pause &nbsp;<kbd>R</kbd> restart &nbsp;<kbd>M</kbd> mute</span><span>aim with direction keys</span>
+      <span class="h">Move</span><span><kbd>WASD</kbd></span><span><kbd>Shift</kbd> sprint</span>
+      <span class="h">Pass / shoot</span><span><kbd>Click</kbd> where you want it</span><span>on the goal = shot, hold = harder</span>
+      <span class="h">Chip / lofted</span><span><kbd>Space</kbd> towards the pointer</span><span><kbd>J</kbd> = ground pass, <kbd>Esc</kbd> = cancel</span>
+      <span class="h">Defend</span><span><kbd>Click</kbd> tackle &nbsp;<kbd>Space</kbd> slide</span><span><kbd>J</kbd> switch</span>
+      <span class="h">Game</span><span><kbd>P</kbd> pause &nbsp;<kbd>R</kbd> restart &nbsp;<kbd>M</kbd> mute</span><span>aim with the pointer</span>
     </div>`;
 
   const TOUCH_CONTROLS = `
@@ -99,6 +99,7 @@
       <button class="btn" id="seasonBtn">${cont ? 'Continue season' : s ? 'Next season' : 'Start season'} (Enter)</button>
       <button class="btn toggle" id="friendlyBtn" style="margin-left:1em">Friendly</button>
       <button class="btn toggle" id="arenaBtn" style="margin-left:1em">Test arena</button>
+      <button class="btn toggle" id="pracBtn" style="margin-left:1em">Practice</button>
       ${s ? '<button class="btn toggle" id="resetBtn" style="margin-left:1em">Start over</button>' : ''}
       <p style="margin-top:1.2em"><button class="btn toggle" id="fcBtn">Full court: ${settings.fullCourt ? 'ON' : 'OFF'} (F)</button>
       <button class="btn toggle" id="smTitle" style="margin-left:1em">Smoothness controls</button>
@@ -109,6 +110,7 @@
     $('seasonBtn').addEventListener('click', seasonEntry);
     $('friendlyBtn').addEventListener('click', friendlyScreen);
     $('arenaBtn').addEventListener('click', arenaScreen);
+    $('pracBtn').addEventListener('click', practiceScreen);
     if ($('resetBtn')) $('resetBtn').addEventListener('click', () => {
       if (confirm('Delete this save and start a brand new season?')) { L.clear(); titleScreen(); }
     });
@@ -122,31 +124,68 @@
     hub(); // shows the season-end screen if the season is over
   }
 
-  // Quick match: any club against any other.
-  let fr = { a: 0, b: 1 };
+  // Quick match: any club against any other, the Premier League and Europe's best, listed
+  // strongest first. The arrows sit in fixed places so you can click through quickly.
+  let fr = { a: 'ars', b: null };
+  const clubScore = (t) => { const r = PP.teamRatings(t).raw; return (r.att + r.mid + r.def) / 3; }; // finer than the stars
   function friendlyScreen() {
     screen = 'title';
-    const clubs = L.clubs(), h = clubs[fr.a], a = clubs[fr.b];
+    const clubs = [...L.clubs(), ...PP.Europe.clubs()].map((t) => ({ t, sc: clubScore(t) })).sort((x, y) => y.sc - x.sc).map((x) => x.t);
+    const n = clubs.length;
+    let ia = clubs.findIndex((t) => t.id === fr.a); if (ia < 0) ia = 0;
+    let ib = clubs.findIndex((t) => t.id === fr.b); if (ib < 0 || ib === ia) ib = ia === 0 ? 1 : 0;
+    const h = clubs[ia], a = clubs[ib];
+    fr = { a: h.id, b: a.id };
     const rh = PP.teamRatings(h), ra = PP.teamRatings(a);
+    const pick = (k, t, i) => `<span class="picker"><button class="btn toggle sm" id="${k}Prev">‹</button><span class="pk" style="color:${t.kit.shirt}">${t.name}<small>${i + 1} of ${n}</small></span><button class="btn toggle sm" id="${k}Next">›</button></span>`;
     show(`<h2>Friendly</h2>
       <table class="stats ratings">
-        <tr><td><button class="btn toggle sm" id="hPrev">‹</button> <span style="color:${h.kit.shirt}">${h.name}</span> <button class="btn toggle sm" id="hNext">›</button></td><td></td>
-            <td><button class="btn toggle sm" id="aPrev">‹</button> <span style="color:${a.kit.shirt}">${a.name}</span> <button class="btn toggle sm" id="aNext">›</button></td></tr>
+        <tr><td>${pick('h', h, ia)}</td><td></td><td>${pick('a', a, ib)}</td></tr>
         <tr><td>${starsTxt(rh.att)}</td><td>Attack</td><td>${starsTxt(ra.att)}</td></tr>
         <tr><td>${starsTxt(rh.mid)}</td><td>Midfield</td><td>${starsTxt(ra.mid)}</td></tr>
         <tr><td>${starsTxt(rh.def)}</td><td>Defence</td><td>${starsTxt(ra.def)}</td></tr>
       </table>
-      <p class="hint">You: ${h.style.epithet}<br>${a.short}: ${a.style.epithet}</p>
-      <button class="btn" id="koBtn">Kick off (Enter)</button> <button class="btn toggle" id="backBtn">Back</button>`);
-    const n = clubs.length, cyc = (k, d) => { do { fr[k] = (fr[k] + d + n) % n; } while (fr.a === fr.b); friendlyScreen(); };
+      <p class="hint">Clubs run from strongest (1) to weakest. You: ${h.style.epithet}<br>${a.short}: ${a.style.epithet}</p>
+      <button class="btn" id="koBtn">Kick off (Enter)</button> <button class="btn toggle" id="bestBtn">Strongest opponent</button> <button class="btn toggle" id="backBtn">Back</button>`);
+    const cyc = (k, d) => {
+      let i = k === 'a' ? ia : ib;
+      do { i = (i + d + n) % n; } while (i === (k === 'a' ? ib : ia));
+      fr[k] = clubs[i].id; friendlyScreen();
+    };
     $('hPrev').addEventListener('click', () => cyc('a', -1)); $('hNext').addEventListener('click', () => cyc('a', 1));
     $('aPrev').addEventListener('click', () => cyc('b', -1)); $('aNext').addEventListener('click', () => cyc('b', 1));
+    $('bestBtn').addEventListener('click', () => { fr.b = clubs.find((t) => t.id !== h.id).id; friendlyScreen(); });
     const go = () => { mode = 'friendly'; startMatch(h, friendlyOpp(h, a)); };
     enterAction = go;
     $('koBtn').addEventListener('click', go);
     $('backBtn').addEventListener('click', titleScreen);
   }
   const friendlyOpp = (h, a) => L.changeKit(h, a);
+
+  // ---------- practice ----------
+  // Drills on the real engine (js/practice.js): you choose the drill; your club is the arena's.
+  const DRILLS = [
+    ['shooting', 'Shooting', 'You, a team-mate and their keeper. Shots from the edge of the box, lay-offs and crosses to finish.'],
+    ['passing', 'Passing', 'A rondo: five of you round a circle, two of them in the middle. Keep it: how many passes in a row?'],
+    ['dribbling', 'Dribbling', 'From halfway, take on the defenders and get into the box with the ball. Every 3 makes it harder (up to 3 defenders).'],
+  ];
+  function practiceScreen() {
+    screen = 'title'; mode = 'practice';
+    match = null; hud.hidden = true;
+    const rows = DRILLS.map(([k, name, txt]) => `<tr class="pick" data-k="${k}"><td class="nm">${name}</td><td class="hint">${txt}</td></tr>`).join('');
+    show(`<h2>Practice</h2><p class="hint">Pick a drill. Reps reset themselves; R starts the drill again, P / Esc pauses.</p>
+      <table class="stats">${rows}</table><button class="btn toggle" id="backBtn">Back</button>`);
+    overlay.querySelectorAll('tr.pick').forEach((tr) => tr.addEventListener('click', () => startDrill(tr.dataset.k)));
+    $('backBtn').addEventListener('click', titleScreen);
+    enterAction = () => startDrill('shooting');
+  }
+  function startDrill(kind) {
+    const clubs = L.clubs(), you = clubs.find((c) => c.id === arena.club) || clubs[0];
+    const opp = clubs.find((c) => c.id !== you.id && Math.abs(c.rating - you.rating) <= 4) || clubs.find((c) => c.id !== you.id);
+    const def = { ...opp, style: { ...opp.style, block: 'high', aggression: 0.75 } };
+    mode = 'practice';
+    startMatch(you, L.changeKit(you, def), { fullCourt: true, noCrowd: true, drill: kind });
+  }
 
   // ---------- test arena ----------
   // Pick the kind of opponent you want to practise against and play a full game: no crowd,
@@ -158,10 +197,11 @@
     strength: [[58, 'Very weak'], [65, 'Weak'], [0, 'Even'], [80, 'Strong'], [88, 'Very strong']],
     formation: Object.keys(PP.FORMATIONS).map((f) => [f, f]),
     fullCourt: [[true, 'Full game (you defend too)'], [false, 'Attacking phases']],
+    aggr: [['auto', 'Usual for the block'], [0.2, 'Passive'], [0.5, 'Measured'], [0.75, 'Aggressive'], [1, 'Relentless']],
     half: [[180, '3 min halves'], [300, '5 min halves'], [600, '10 min halves']],
   };
-  const ARENA_LABELS = { club: 'You play as', style: 'They defend with', width: 'Their shape', strength: 'Their strength', formation: 'Their formation', fullCourt: 'Mode', half: 'Length' };
-  const arena = { club: 'ars', style: 'high', width: 0.6, strength: 0, formation: '4-4-2', fullCourt: true, half: 180 };
+  const ARENA_LABELS = { club: 'You play as', style: 'They defend with', width: 'Their shape', strength: 'Their strength', formation: 'Their formation', aggr: 'Their pressing', fullCourt: 'Mode', half: 'Length' };
+  const arena = { club: 'ars', style: 'high', width: 0.6, strength: 0, formation: '4-4-2', aggr: 'auto', fullCourt: true, half: 180 };
   try { Object.assign(arena, JSON.parse(localStorage.getItem('pp.arena') || '{}')); } catch (e) { /* none */ }
   function arenaScreen() {
     screen = 'title'; mode = 'arena';
@@ -187,13 +227,14 @@
       const opp = {
         id: 'opp', name: `${sl} ${st.toLowerCase()} XI`, short: 'OPP', formation: arena.formation,
         rating: arena.strength || you.rating,
-        style: { block: arena.style, compact: arena.width, fwdDefend: arena.style === 'high' ? 'high' : 'help', epithet: `${st}, ${ARENA_OPTS.width.find((o) => o[0] === arena.width)[1].toLowerCase()}` },
+        style: { block: arena.style, compact: arena.width, fwdDefend: arena.style === 'high' ? 'high' : 'help', aggression: arena.aggr === 'auto' ? undefined : arena.aggr,
+          epithet: `${st}, ${ARENA_OPTS.width.find((o) => o[0] === arena.width)[1].toLowerCase()}${arena.aggr === 'auto' ? '' : ' · ' + PP.pressWord(arena.aggr) + ' pressing'}` },
         kit: { shirt: '#3d4450', shade: '#262b33', shorts: '#1b1b1b', socks: '#3d4450' },
         gkKit: { shirt: '#7bd389', shade: '#3f8a4c', shorts: '#1b1b2f', socks: '#7bd389' },
       };
       PP.ensureSquad(opp);
       mode = 'arena';
-      startMatch(you, L.changeKit(you, opp), { fullCourt: arena.fullCourt, halfSeconds: arena.half, noCrowd: true });
+      startMatch(you, L.changeKit(you, opp), { fullCourt: arena.fullCourt, halfSeconds: arena.half, noCrowd: true, fixedBlock: true });
       match.say(opp.name, 2);
     };
     enterAction = go;
@@ -256,13 +297,13 @@
         <tr><td>${starsTxt(ru.mid)}</td><td>Midfield</td><td>${starsTxt(ro.mid)}</td></tr>
         <tr><td>${starsTxt(ru.def)}</td><td>Defence</td><td>${starsTxt(ro.def)}</td></tr>
       </table>
-      <p class="hint">${u.rival === opp.id ? '<b class="derby">DERBY DAY</b> · ' : ''}${fx.neutral ? 'Neutral venue' : fx.home ? 'Home' : 'Away'} · ${opp.short}: ${opp.style.epithet}${fx.agg ? ` · <b>aggregate ${fx.agg[0]}-${fx.agg[1]}</b> after the 1st leg; level after this one means penalties` : fx.decider ? ' · a draw goes to penalties' : ''}</p>
+      <p class="hint">${u.rival === opp.id ? '<b class="derby">DERBY DAY</b> · ' : ''}${fx.neutral ? 'Neutral venue' : fx.home ? 'Home' : 'Away'} · ${opp.short}: ${opp.style.epithet}${fx.agg ? ` · <b>aggregate ${fx.agg[0]}-${fx.agg[1]}</b> after the 1st leg; level after this one means extra time, then penalties` : fx.decider ? ' · a draw goes to extra time, then penalties' : ''}</p>
       ${miniTable(rows, u.id, from, from + 5)}
       <button class="btn" id="playBtn">Play match (Enter)</button>
       <button class="btn toggle" id="tblBtn">Table</button> <button class="btn toggle" id="fixBtn">Fixtures</button>
       <button class="btn toggle" id="eurBtn">Europe</button>
-      <button class="btn toggle" id="sqBtn">Squad</button> <button class="btn toggle" id="menuBtn">Menu</button>`);
-    const play = () => { mode = 'season'; startMatch(u, L.oppDef(opp.id)); if (match) match.say(cl ? (fx.ko ? PP.Europe.STAGE_NAME[L.current().k] : 'Champions League') : u.rival === opp.id ? 'Derby day!' : 'Kick off', 2.2); };
+      <button class="btn toggle" id="sqBtn">Squad</button> <button class="btn toggle" id="statBtn">Stats</button> <button class="btn toggle" id="menuBtn">Menu</button>`);
+    const play = () => { mode = 'season'; startMatch(u, L.oppDef(opp.id), { ko: fx.comp === 'cl' && fx.decider ? { agg: fx.agg || [0, 0] } : null }); if (match) match.say(cl ? (fx.ko ? PP.Europe.STAGE_NAME[L.current().k] : 'Champions League') : u.rival === opp.id ? 'Derby day!' : 'Kick off', 2.2); };
     const ch = $('eurBtn'); if (!s.cl) ch.hidden = true;
     $('eurBtn').addEventListener('click', europeScreen);
     enterAction = play;
@@ -270,7 +311,39 @@
     $('tblBtn').addEventListener('click', tableScreen);
     $('fixBtn').addEventListener('click', fixturesScreen);
     $('sqBtn').addEventListener('click', squadScreen);
+    $('statBtn').addEventListener('click', () => statsScreen());
     $('menuBtn').addEventListener('click', titleScreen);
+  }
+
+  // Season player stats: your squad (all competitions), and the Premier League's top scorers
+  // and assists (every club's matches count: played ones as they happened, simulated ones
+  // handed out by position and finishing).
+  function statsScreen(view = 'squad') {
+    screen = 'stats';
+    const s = L.s, u = L.user();
+    const club = (id) => { const t = L.team(id); return t ? `<i class="sw" style="background:${t.kit.shirt}"></i>${t.short}` : id; };
+    let body;
+    if (view === 'squad') {
+      const form = PP.FORMATIONS[u.formation];
+      const all = [...u.squad.map((pl, i) => ({ pl, pos: form[i][0] })), ...(u.bench || []).map((pl) => ({ pl, pos: pl.pos, bench: true }))];
+      const rows = all.map(({ pl, pos, bench }) => ({ pl, pos, bench, r: L.playerSeason(u.id, pl.name) }))
+        .sort((a, c) => c.r.g - a.r.g || c.r.a - a.r.a || c.r.apps - a.r.apps);
+      body = `<table class="stats pstats"><tr><th>#</th><th>Name</th><th>Pos</th><th>Apps</th><th>G</th><th>A</th><th>Shots</th><th>Tkl</th><th>CS</th></tr>
+        ${rows.map(({ pl, pos, bench, r }) => `<tr${bench ? ' class="hint"' : ''}><td>${pl.num}</td><td class="nm">${pl.name}</td><td>${pos}</td><td>${r.apps}</td><td><b>${r.g}</b></td><td>${r.a}</td><td>${r.sh}</td><td>${r.tk}</td><td>${pos === 'GK' ? r.cs : ''}</td></tr>`).join('')}</table>
+        <p class="hint">All competitions. Tkl = tackles won, CS = clean sheets. Bench players are greyed.</p>`;
+    } else {
+      const key = view === 'scorers' ? 'g' : 'a';
+      const top = L.leaders('pl', key, 15);
+      body = `<table class="stats pstats"><tr><th></th><th>Name</th><th>Club</th><th>Apps</th><th>${key === 'g' ? '<b>Goals</b>' : 'Goals'}</th><th>${key === 'a' ? '<b>Assists</b>' : 'Assists'}</th></tr>
+        ${top.map((r, i) => `<tr${r.club === u.id ? ' class="me"' : ''}><td>${i + 1}</td><td class="nm">${r.name}</td><td>${club(r.club)}</td><td>${r.apps}</td><td>${r.g}</td><td>${r.a}</td></tr>`).join('') || '<tr><td colspan="6" class="hint">No goals yet.</td></tr>'}</table>
+        <p class="hint">Premier League only.</p>`;
+    }
+    const tab = (v, label) => `<button class="btn toggle${v === view ? ' on' : ''}" data-v="${v}">${label}</button>`;
+    show(`<h2>Season ${s.season} stats</h2><p>${tab('squad', 'Your squad')} ${tab('scorers', 'Top scorers')} ${tab('assists', 'Top assists')}</p>
+      ${body}<button class="btn" id="backBtn">Back (Enter)</button>`);
+    overlay.querySelectorAll('button[data-v]').forEach((b) => b.addEventListener('click', () => statsScreen(b.dataset.v)));
+    enterAction = hub;
+    $('backBtn').addEventListener('click', hub);
   }
 
   function tableScreen() {
@@ -448,7 +521,7 @@
     if (!h) { [h, a] = lastDefs || PP.TEAM_DEFS; opts = lastOpts; }
     opts = opts || {};
     lastDefs = [h, a]; lastOpts = opts;
-    match = new PP.Match(h, a, { fullCourt: opts.fullCourt ?? settings.fullCourt, halfSeconds: opts.halfSeconds, sound: true });
+    match = new PP.Match(h, a, { fullCourt: opts.fullCourt ?? settings.fullCourt, halfSeconds: opts.halfSeconds, sound: true, fixedBlock: !!opts.fixedBlock, drill: opts.drill, ko: opts.ko });
     match.noCrowd = !!opts.noCrowd;
     PP.match = match; // handy for debugging in the console
     $('homeName').textContent = h.short;
@@ -468,20 +541,26 @@
     const tot = m.stats.poss[0] + m.stats.poss[1] || 1;
     const pc = (i) => Math.round((100 * m.stats.poss[i]) / tot);
     const goals = m.events.filter((e) => e.type === 'goal')
-      .map((e) => `${e.minute}' ${e.scorer}${e.og ? ' (og)' : ''} — ${e.team === 0 ? m.home.short : m.away.short}`).join('<br>');
+      .map((e) => `${e.minute}' ${e.scorer}${e.og ? ' (og)' : ''}${e.assist ? ` <span class="hint">(${e.assist})</span>` : ''} — ${e.team === 0 ? m.home.short : m.away.short}`).join('<br>');
+    const mine = m.home.players.map((p) => ({ p, r: m.ps(p) })).filter(({ r }) => r.goals || r.assists || r.shots || r.tackles)
+      .sort((a, c) => c.r.goals - a.r.goals || c.r.assists - a.r.assists || c.r.shots - a.r.shots)
+      .map(({ p, r }) => `${p.name.split(' ').pop()} ${[r.goals && `${r.goals}G`, r.assists && `${r.assists}A`, r.shots && `${r.shots} sh`, r.tackles && `${r.tackles} tkl`].filter(Boolean).join(' ')}`).join(' · ');
     const cards = m.events.filter((e) => e.type === 'card')
       .map((e) => `<span style="color:${e.card === 'red' ? '#e4572e' : '#ffd23f'}">■</span> ${e.minute}' ${e.name} (${e.team === 0 ? m.home.short : m.away.short})`).join(' &nbsp; ');
     return `<table class="stats">
       <tr><td>${m.stats.shots[0]}</td><td>Shots</td><td>${m.stats.shots[1]}</td></tr>
       <tr><td>${m.stats.onTarget[0]}</td><td>On target</td><td>${m.stats.onTarget[1]}</td></tr>
       <tr><td>${pc(0)}%</td><td>Possession</td><td>${pc(1)}%</td></tr>
-    </table>${goals ? `<p>${goals}</p>` : ''}${cards ? `<p class="hint">${cards}</p>` : ''}`;
+    </table>${goals ? `<p>${goals}</p>` : ''}${mine ? `<p class="hint">Your players: ${mine}</p>` : ''}${cards ? `<p class="hint">${cards}</p>` : ''}`;
   }
 
   function halftime() {
     screen = 'halftime'; I.unlock(); PP.Sound.crowdPause(true); PP.Touch.reset(I);
-    show(`<h2>Half time</h2><p class="big">${match.home.short} ${match.score[0]} - ${match.score[1]} ${match.away.short}</p>
-      ${statsTable(match)}<button class="btn">Second half (Enter)</button>`, secondHalf);
+    const h = match.half, ag = match.ko && match.ko.agg && (match.ko.agg[0] || match.ko.agg[1]);
+    const title = h === 1 ? 'Half time' : h === 2 ? 'Level after 90: extra time' : 'Extra time: half time';
+    const sub = h === 2 ? `<p class="hint">Two halves of 15 minutes${ag ? ` (aggregate ${match.score[0] + match.ko.agg[0]}-${match.score[1] + match.ko.agg[1]})` : ''}. Still level after 120 and it goes to penalties.</p>` : '';
+    show(`<h2>${title}</h2><p class="big">${match.home.short} ${match.score[0]} - ${match.score[1]} ${match.away.short}</p>
+      ${sub}${statsTable(match)}<button class="btn">${h === 1 ? 'Second half' : h === 2 ? 'Extra time' : 'Second half of extra time'} (Enter)</button>`, secondHalf);
   }
   function secondHalf() { match.startSecondHalf(); hide(); screen = 'match'; if (!match.noCrowd) PP.Sound.crowdPause(false); grab(); }
 
@@ -491,10 +570,11 @@
     const res = a > b ? 'You win!' : a < b ? 'You lose' : 'Draw';
     let next = mode === 'arena' ? arenaScreen : titleScreen, label = mode === 'arena' ? 'Back to the arena' : 'Back to menu';
     if (mode === 'season' && L.s && !L.s.over) {
-      const sum = L.finishRound(a, b); // the result is locked in at the whistle
+      const sum = L.finishRound(a, b, match.playerLines()); // the result (and the players' stats) locked in at the whistle
       next = () => resultsScreen(sum); label = 'Continue';
     }
-    show(`<h2>Full time — ${res}</h2><p class="big">${match.home.short} ${a} - ${b} ${match.away.short}</p>
+    const aet = match.half > 2 ? (match.ko && match.koLevel() ? ' <small>after extra time · penalties</small>' : ' <small>after extra time</small>') : '';
+    show(`<h2>Full time — ${res}</h2><p class="big">${match.home.short} ${a} - ${b} ${match.away.short}${aet}</p>
       ${statsTable(match)}<button class="btn">${label} (Enter)</button>`, next);
     enterAction = next;
   }
@@ -521,13 +601,14 @@
       return `<tr data-k="${k}" class="opt"><td>${PP.SETTING_LABELS[k]}</td><td><button class="btn toggle">${cur[1]}</button></td></tr>`;
     }).join('');
     show(`<h2>Smoothness</h2><table class="stats smooth">${rows}</table>
-      <p class="hint">Click to change. Mouse pointer: the crosshair is where you aim. Mouse (locked): like a first-person game, the pointer is hidden and moving the mouse pushes a crosshair around the ball (click the pitch to grab the mouse, Esc to let go). Keys still move your player.</p>
+      <p class="hint">Click to change. Mouse pointer: the crosshair is where you aim. Mouse (locked): like a first-person game, the pointer is hidden and moving the mouse pushes a crosshair around the ball (click the pitch to grab the mouse, Esc to let go). Keys still move your player. Camera applies from the title screen (in a match, from the next reload).</p>
       <button class="btn" id="smBack">Back</button>`);
     overlay.querySelectorAll('tr.opt').forEach((tr) => tr.addEventListener('click', () => {
       const k = tr.dataset.k, opts = PP.SETTING_OPTIONS[k];
       const i = opts.findIndex((o) => o[0] === PP.settings[k]);
       PP.settings[k] = opts[(i + 1) % opts.length][0];
       PP.saveSettings();
+      if (k === 'camera' && !match) { location.reload(); return; } // the renderer reads the zoom on load
       smoothnessCard(back);
     }));
     $('smBack').addEventListener('click', back);
@@ -554,28 +635,90 @@
 
   function pause() {
     screen = 'paused'; I.unlock(); PP.Sound.crowdPause(true); PP.Touch.reset(I);
-    const arenaBtns = mode === 'arena' ? ' <button class="btn toggle" id="arenaSet">Change opponent</button> <button class="btn toggle" id="restartBtn">Restart (R)</button>' : '';
-    show(`<h2>Paused</h2>${squadTable(match.home)}${controlsHelp()}<button class="btn" id="resBtn">Resume (Enter / P)</button> <button class="btn toggle" id="smBtn">Smoothness</button> <button class="btn toggle" id="sndBtn">Sound</button>${arenaBtns}`);
+    const arenaBtns = mode === 'arena' ? ' <button class="btn toggle" id="arenaSet">Change opponent</button> <button class="btn toggle" id="restartBtn">Restart (R)</button>'
+      : mode === 'practice' ? ' <button class="btn toggle" id="arenaSet">Change drill</button> <button class="btn toggle" id="restartBtn">Restart (R)</button>' : '';
+    show(`<h2>Paused</h2>${squadTable(match.home)}${controlsHelp()}<button class="btn" id="resBtn">Resume (Enter / P)</button> <button class="btn toggle" id="smBtn">Smoothness</button> <button class="btn toggle" id="sndBtn">Sound</button> <button class="btn toggle" id="fbBtn">Export for feedback</button>${arenaBtns}`);
     $('sndBtn').addEventListener('click', () => soundCard(pause));
+    $('fbBtn').addEventListener('click', feedbackCard);
     $('resBtn').addEventListener('click', resume);
     $('smBtn').addEventListener('click', () => smoothnessCard(pause));
-    if (mode === 'arena') {
-      $('arenaSet').addEventListener('click', arenaScreen);   // back to the arena set-up (this match is dropped)
+    if (mode === 'arena' || mode === 'practice') {
+      $('arenaSet').addEventListener('click', mode === 'arena' ? arenaScreen : practiceScreen); // back to the set-up (this match is dropped)
       $('restartBtn').addEventListener('click', () => startMatch());
     }
+  }
+  // ---------- export for feedback ----------
+  // A screenshot of the paused frame (scaled up 3x, crisp pixels) plus the whole match state:
+  // every player's position, speed, stats, what the AI has him doing (aiRole) and the ball.
+  // Saved by serve.py into feedback/; if that isn't there, both download instead.
+  function exportShot() {
+    if (match) R.draw(match, 0, 1); // draw this exact moment (not whatever the canvas last held)
+    const src = $('game'), k = 3, c = document.createElement('canvas');
+    c.width = src.width * k; c.height = src.height * k;
+    const g = c.getContext('2d'); g.imageSmoothingEnabled = false; g.drawImage(src, 0, 0, c.width, c.height);
+    return c.toDataURL('image/png');
+  }
+  function exportState(m) {
+    const r2 = (v) => (Number.isFinite(v) ? Math.round(v * 100) / 100 : v);
+    const b = m.ball, lk = b.lastKick;
+    const pl = (p) => ({
+      name: p.name, num: p.num, role: p.role, team: p.team === m.home ? 'home (you)' : 'away (CPU)', aiRole: p.aiRole || null,
+      x: r2(p.x), y: r2(p.y), vx: r2(p.vx), vy: r2(p.vy), facing: [r2(p.fx), r2(p.fy)], depth: r2(p.team.depth(p.x)),
+      energy: r2(p.energy), stun: r2(p.stun), think: r2(p.think), plan: p.plan ? { kind: p.plan.kind, x: r2(p.plan.x), y: r2(p.plan.y), sprint: !!p.plan.sprint } : null,
+      receiving: !!p.receiving, yellow: p.yellow || 0, sentOff: !!p.sentOff, controlled: p === m.controlled, stats: p.stats,
+    });
+    const team = (t) => ({ name: t.name || t.def.name, short: t.short || t.def.short, formation: t.def.formation, rating: t.def.rating, block: t.block, style: t.style, dir: t.dir });
+    return {
+      version: PP.VERSION, savedAt: new Date().toISOString(), mode, settings: PP.settings, tune: PP.AI.TUNE,
+      pitch: { W: C.W, H: C.H, note: 'metres; x along the pitch, y across (0 = far touchline at the top); depth 0 = own goal line, 1 = theirs' },
+      match: { state: m.state, restart: m.restart ? { kind: m.restart.kind, team: m.restart.team === m.home ? 'home' : 'away', taker: m.restart.taker && m.restart.taker.name } : null,
+        half: m.half, clock: m.minuteLabel(), score: m.score, fullCourt: m.fullCourt, ko: m.ko, simTime: r2(m.time), banner: m.banner && m.banner.text },
+      ball: { x: r2(b.x), y: r2(b.y), z: r2(b.z), vx: r2(b.vx), vy: r2(b.vy), vz: r2(b.vz), owner: b.owner ? b.owner.name : null,
+        lastKick: lk ? { type: lk.type, by: lk.by && lk.by.name, target: lk.target && lk.target.name, ago: r2(m.time - lk.t) } : null },
+      teams: { home: team(m.home), away: team(m.away) },
+      players: m.players.map(pl), events: m.events, stats: m.stats,
+    };
+  }
+  function feedbackCard() {
+    show(`<h2>Export for feedback</h2>
+      <p class="hint">Saves a screenshot of this moment and the full match state (every player's position, what the AI has him doing, the ball). Add a note on what looks wrong:</p>
+      <textarea id="fbNote" rows="4" class="fbnote" placeholder="e.g. their #4 should be marking our striker here"></textarea>
+      <p><button class="btn" id="fbSave">Save</button> <button class="btn toggle" id="fbBack">Back</button></p><p class="hint" id="fbMsg"></p>`);
+    const note = $('fbNote');
+    ['keydown', 'keyup'].forEach((ev) => note.addEventListener(ev, (e) => e.stopPropagation())); // typing isn't game input
+    note.focus();
+    enterAction = null;
+    $('fbBack').addEventListener('click', pause);
+    $('fbSave').addEventListener('click', async () => {
+      const payload = { png: exportShot(), state: exportState(match), note: note.value };
+      const msg = $('fbMsg');
+      try {
+        const res = await fetch('feedback', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+        if (!res.ok) throw new Error(res.status);
+        const { saved } = await res.json();
+        msg.textContent = `Saved ${saved}.png and .json in the game folder. Tell Claude to look at it.`;
+      } catch (e) {
+        const dl = (href, name) => { const a = document.createElement('a'); a.href = href; a.download = name; a.click(); };
+        const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+        dl(payload.png, `pixel-pitch-${stamp}.png`);
+        dl(URL.createObjectURL(new Blob([JSON.stringify({ note: payload.note, ...payload.state }, null, 1)], { type: 'application/json' })), `pixel-pitch-${stamp}.json`);
+        msg.textContent = 'The game server could not save it, so it downloaded instead.';
+      }
+    });
   }
   function resume() { PP.Touch.reset(I); hide(); screen = 'match'; if (!match.noCrowd) PP.Sound.crowdPause(false); grab(); }
 
   function updateHud() {
     $('pauseBtn').hidden = !(screen === 'match' && touchDevice());
     if (!match) return;
-    const min = Math.min(90, Math.floor(match.clock / 60));
+    const min = match.clock >= match.nominalEnd() ? match.minuteLabel() : Math.floor(match.clock / 60);
     const c = match.controlled;
-    const key = `${match.score}|${min}|${match.banner ? match.banner.text : ''}|${c ? c.name : ''}|${c ? Math.round(c.energy * 20) : ''}`;
+    const dh = match.hud; // a practice drill shows its own count instead of the score and clock
+    const key = `${match.score}|${min}|${dh ? dh.score + dh.clock : ''}|${match.banner ? match.banner.text : ''}|${c ? c.name : ''}|${c ? Math.round(c.energy * 20) : ''}`;
     if (key === lastHud) return;
     lastHud = key;
-    $('score').textContent = `${match.score[0]} - ${match.score[1]}`;
-    $('clock').textContent = `${min}'`;
+    $('score').textContent = dh ? dh.score : `${match.score[0]} - ${match.score[1]}`;
+    $('clock').textContent = dh ? dh.clock : `${min}'`;
     const bn = $('banner');
     if (match.banner) { bn.textContent = match.banner.text; bn.classList.add('show'); }
     else bn.classList.remove('show');
@@ -615,7 +758,7 @@
     if (I.hit('mute')) { I.endStep(); const muted = PP.Sound.toggleMute(); if (match) match.say(muted ? 'Sound off' : 'Sound on', 0.8); }
     if (screen === 'title' && I.hit('fullcourt')) { I.endStep(); setFullCourt(!settings.fullCourt); titleScreen(); }
     if (screen === 'match') {
-      if (I.hit('pause')) { I.endStep(); pause(); }
+      if (I.hit('pause') && !(match.charging && I.hit('cancel'))) { I.endStep(); pause(); }
       else {
         acc += dt;
         match.mouseWorld = I.mouse ? R.screenToWorld(I.mouse.x, I.mouse.y) : null;
@@ -649,5 +792,5 @@
 
   titleScreen();
   requestAnimationFrame(frame);
-  PP.ui = { hub, resultsScreen, europeScreen, seasonEndScreen, squadScreen, pause, arenaScreen }; // console / testing
+  PP.ui = { hub, resultsScreen, europeScreen, seasonEndScreen, squadScreen, pause, arenaScreen, practiceScreen, startDrill }; // console / testing
 })();
